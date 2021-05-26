@@ -15,7 +15,7 @@ use zenith_utils::lsn::Lsn;
 pub fn send_tarball_at_lsn(
     write: &mut dyn Write,
     timelineid: ZTimelineId,
-    _timeline: &Arc<dyn Timeline>,
+    _timeline: &Arc<Timeline>,
     _lsn: Lsn,
     snapshot_lsn: Lsn,
 ) -> anyhow::Result<()> {

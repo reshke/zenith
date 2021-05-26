@@ -98,8 +98,11 @@ pub fn init_repo(conf: &'static PageServerConf, repo_dir: &Path) -> Result<()> {
     // and we failed to run initdb again in the same directory. This has been solved for the
     // rapid init+start case now, but the general race condition remains if you restart the the
     // server quickly.
-    let repo = crate::repository::rocksdb::RocksRepository::new(
+    let storage = crate::rocksdb_storage::RocksStorage::create(conf)?;
+
+    let repo = crate::repository::Repository::new(
         conf,
+        std::sync::Arc::new(storage),
         std::sync::Arc::new(crate::walredo::DummyRedoManager {}),
     );
     let timeline = repo.create_empty_timeline(tli, Lsn(lsn))?;
@@ -141,7 +144,7 @@ pub fn init_repo(conf: &'static PageServerConf, repo_dir: &Path) -> Result<()> {
 
 pub(crate) fn get_branches(
     conf: &PageServerConf,
-    repository: &dyn Repository,
+    repository: &Repository,
 ) -> Result<Vec<BranchInfo>> {
     // Each branch has a corresponding record (text file) in the refs/branches
     // with timeline_id.
