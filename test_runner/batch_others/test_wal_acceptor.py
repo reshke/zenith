@@ -330,3 +330,29 @@ def test_timeline_status(zenith_env_builder: ZenithEnvBuilder):
 
     epoch_after_reboot = wa_http_cli.timeline_status(tenant_id, timeline_id).acceptor_epoch
     assert epoch_after_reboot > epoch
+
+def test_large_wal_record(zenith_env_builder: ZenithEnvBuilder):
+    zenith_env_builder.num_safekeepers = 1
+    env = zenith_env_builder.init()
+
+    env.zenith_cli(["branch", "test_large_wal_record", "main"])
+    pg = env.postgres.create_start('test_large_wal_record')
+
+    wa = env.safekeepers[0]
+    # wa_http_cli = wa.http_client()
+    # wa_http_cli.check_status()
+
+    for i in range(5):
+        flush_lsn = pg.safe_psql('SELECT pg_current_wal_flush_lsn()')[0][0]
+        log.info(f"flush_lsn = {flush_lsn}")
+
+        # record with size about 16MB
+        logical_lsn = pg.safe_psql("SELECT pg_logical_emit_message(false, 'hello', REPEAT('8symbols', 128 * 1024 * 16))")[0][0]
+        log.info(f"logical_lsn = {logical_lsn}")
+
+        flush_lsn = pg.safe_psql('SELECT pg_current_wal_flush_lsn()')[0][0]
+        log.info(f"flush_lsn = {flush_lsn}")
+
+        wa.stop()
+        wa.start()
+
