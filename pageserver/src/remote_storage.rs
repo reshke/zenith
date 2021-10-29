@@ -82,7 +82,7 @@
 //! The sync queue processing also happens in batches, so the sync tasks can wait in the queue for some time.
 
 mod local_fs;
-mod rust_s3;
+mod rusoto_s3;
 mod storage_sync;
 
 use std::{
@@ -97,7 +97,7 @@ use tracing::{error, info};
 use zenith_utils::zid::{ZTenantId, ZTimelineId};
 
 pub use self::storage_sync::{schedule_timeline_checkpoint_upload, schedule_timeline_download};
-use self::{local_fs::LocalFs, rust_s3::S3};
+use self::{local_fs::LocalFs, rusoto_s3::RusotoS3};
 use crate::{
     config::{PageServerConf, RemoteStorageKind},
     layered_repository::metadata::{TimelineMetadata, METADATA_FILE_NAME},
@@ -156,7 +156,7 @@ pub fn start_local_timeline_sync(
                 storage_sync::spawn_storage_sync_thread(
                     config,
                     local_timeline_files,
-                    S3::new(s3_config, &config.workdir)?,
+                    RusotoS3::new(s3_config, &config.workdir)?,
                     storage_config.max_concurrent_sync,
                     storage_config.max_sync_errors,
                 )
