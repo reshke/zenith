@@ -178,8 +178,9 @@ impl<'a> Iterator for OrderedPageVersionIter<'a> {
 mod tests {
     use bytes::Bytes;
 
+    use crate::config::PageServerConf;
+
     use super::*;
-    use crate::PageServerConf;
     use std::fs;
     use std::str::FromStr;
     use zenith_utils::zid::{ZTenantId, ZTimelineId};

@@ -5,7 +5,7 @@ use std::process::Command;
 use std::time::Duration;
 use std::{io, result, thread};
 
-use anyhow::bail;
+use anyhow::{bail, Context};
 use nix::errno::Errno;
 use nix::sys::signal::{kill, Signal};
 use nix::unistd::Pid;
@@ -81,57 +81,64 @@ impl PageServerNode {
         PageServerNode {
             pg_connection_config: Self::pageserver_connection_config(
                 password,
-                env.pageserver.pg_port,
+                &env.pageserver.listen_pg_addr,
             ),
             env: env.clone(),
             http_client: Client::new(),
-            http_base_url: format!("http://localhost:{}/v1", env.pageserver.http_port),
+            http_base_url: format!("http://{}/v1", env.pageserver.listen_http_addr),
         }
     }
 
     /// Construct libpq connection string for connecting to the pageserver.
-    fn pageserver_connection_config(password: &str, port: u16) -> Config {
-        format!("postgresql://no_user:{}@localhost:{}/no_db", password, port)
+    fn pageserver_connection_config(password: &str, listen_addr: &str) -> Config {
+        format!("postgresql://no_user:{}@{}/no_db", password, listen_addr)
             .parse()
             .unwrap()
     }
 
     pub fn init(&self, create_tenant: Option<&str>) -> anyhow::Result<()> {
-        let listen_pg = format!("localhost:{}", self.env.pageserver.pg_port);
-        let listen_http = format!("localhost:{}", self.env.pageserver.http_port);
+        let mut cmd = Command::new(self.env.pageserver_bin()?);
+        // FIXME: the paths should be shell-escaped to handle paths with spaces, quotas etc.
         let mut args = vec![
-            "--init",
-            "-D",
-            self.env.base_data_dir.to_str().unwrap(),
-            "--postgres-distrib",
-            self.env.pg_distrib_dir.to_str().unwrap(),
-            "--listen-pg",
-            &listen_pg,
-            "--listen-http",
-            &listen_http,
+            "--init".to_string(),
+            "-D".to_string(),
+            self.env.base_data_dir.display().to_string(),
+            "-c".to_string(),
+            format!("pg_distrib_dir='{}'", self.env.pg_distrib_dir.display()),
+            "-c".to_string(),
+            format!("auth_type='{}'", self.env.pageserver.auth_type),
         ];
 
-        let auth_type_str = &self.env.pageserver.auth_type.to_string();
         if self.env.pageserver.auth_type != AuthType::Trust {
-            args.extend(&["--auth-validation-public-key-path", "auth_public_key.pem"]);
+            args.extend([
+                "-c".to_string(),
+                format!(
+                    "auth_validation_public_key_path='{}'",
+                    self.env.base_data_dir.join("auth_public_key.pem").display()
+                ),
+            ]);
         }
-        args.extend(&["--auth-type", auth_type_str]);
 
         if let Some(tenantid) = create_tenant {
-            args.extend(&["--create-tenant", tenantid])
+            args.extend(["--create-tenant".to_string(), tenantid.to_string()])
         }
 
-        let mut cmd = Command::new(self.env.pageserver_bin()?);
-        cmd.args(args).env_clear().env("RUST_BACKTRACE", "1");
+        let status = cmd
+            .args(args)
+            .env_clear()
+            .env("RUST_BACKTRACE", "1")
+            .status()
+            .expect("pageserver init failed");
 
-        let var = "LLVM_PROFILE_FILE";
-        if let Some(val) = std::env::var_os(var) {
-            cmd.env(var, val);
-        }
-
-        if !cmd.status()?.success() {
+        if !status.success() {
             bail!("pageserver init failed");
         }
+
+        // Write pageserver.toml. This is kind of pointless because it will
+        // be overwritten on 'zenith start' anyway, but the overwritten file
+        // contains the warning about editing the file by hand, which is nice
+        // for humans.
+        self.write_pageserver_toml()?;
 
         Ok(())
     }
@@ -144,6 +151,16 @@ impl PageServerNode {
         self.repo_path().join("pageserver.pid")
     }
 
+    fn write_pageserver_toml(&self) -> anyhow::Result<()> {
+        let toml_path = self.env.base_data_dir.join("pageserver.toml");
+        std::fs::write(&toml_path, self.env.pageserver.toml_string()).with_context(|| {
+            format!(
+                "Failed to write toml contents into '{}'",
+                toml_path.display()
+            )
+        })
+    }
+
     pub fn start(&self) -> anyhow::Result<()> {
         print!(
             "Starting pageserver at '{}' in '{}'",
@@ -151,6 +168,8 @@ impl PageServerNode {
             self.repo_path().display()
         );
         io::stdout().flush().unwrap();
+
+        self.write_pageserver_toml()?;
 
         let mut cmd = Command::new(self.env.pageserver_bin()?);
         cmd.args(&["-D", self.repo_path().to_str().unwrap()])

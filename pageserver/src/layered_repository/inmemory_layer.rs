@@ -4,6 +4,7 @@
 //!
 //! And there's another BTreeMap to track the size of the relation.
 //!
+use crate::config::PageServerConf;
 use crate::layered_repository::ephemeral_file::EphemeralFile;
 use crate::layered_repository::filename::DeltaFileName;
 use crate::layered_repository::storage_layer::{
@@ -13,7 +14,6 @@ use crate::layered_repository::LayeredTimeline;
 use crate::layered_repository::ZERO_PAGE;
 use crate::layered_repository::{DeltaLayer, ImageLayer};
 use crate::repository::WALRecord;
-use crate::PageServerConf;
 use crate::{ZTenantId, ZTimelineId};
 use anyhow::{ensure, Result};
 use bytes::Bytes;

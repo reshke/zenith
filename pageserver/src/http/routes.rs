@@ -25,8 +25,9 @@ use zenith_utils::zid::{opt_display_serde, ZTimelineId};
 use super::models::BranchCreateRequest;
 use super::models::TenantCreateRequest;
 use crate::branches::BranchInfo;
+use crate::config::PageServerConf;
 use crate::repository::TimelineSyncState;
-use crate::{branches, tenant_mgr, PageServerConf, ZTenantId};
+use crate::{branches, tenant_mgr, ZTenantId};
 
 #[derive(Debug)]
 struct State {
