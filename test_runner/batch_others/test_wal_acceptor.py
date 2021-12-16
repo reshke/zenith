@@ -314,6 +314,26 @@ def test_race_conditions(zenith_env_builder: ZenithEnvBuilder, stop_value):
     proc.join()
 
 
+def test_pgbench_safekeeper(zenith_env_builder: ZenithEnvBuilder, pg_bin: PgBin):
+    zenith_env_builder.num_safekeepers = 3
+    env = zenith_env_builder.init()
+
+    env.zenith_cli(["branch", "test_pgbench_safekeeper", "main"])
+    pg = env.postgres.create_start('test_pgbench_safekeeper')
+
+    pg_bin.run_capture(['pgbench', '-i', '-s', '400'],
+                       {
+                           'PGPORT': str(pg.port),
+                           'PGUSER': pg.username,
+                           'PGDATABASE': 'postgres',
+                           'PGHOST': pg.host,
+                       },
+                       timeout=400)
+
+    res = pg.safe_psql("SELECT sum(abalance) FROM pgbench_accounts")
+    log.info(f'select sum(abalance) from pgbench_accounts: {res}')
+
+
 class ProposerPostgres:
     """Object for running safekeepers sync with walproposer"""
     def __init__(self, env: ZenithEnv, pgdata_dir: str, pg_bin, timeline_id: str, tenant_id: str):
