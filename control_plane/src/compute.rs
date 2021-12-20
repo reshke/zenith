@@ -125,7 +125,7 @@ impl ComputeControlPlane {
         });
 
         node.create_pgdata()?;
-        node.setup_pg_conf(self.env.pageserver.auth_type)?;
+        node.setup_pg_conf(self.env.pageserver().auth_type())?;
 
         self.nodes
             .insert((tenantid, node.name.clone()), Arc::clone(&node));
@@ -342,13 +342,13 @@ impl PostgresNode {
         }
         conf.append_line("");
 
-        if !self.env.safekeepers.is_empty() {
+        if !self.env.safekeepers().is_empty() {
             // Configure the node to connect to the safekeepers
             conf.append("synchronous_standby_names", "walproposer");
 
             let wal_acceptors = self
                 .env
-                .safekeepers
+                .safekeepers()
                 .iter()
                 .map(|sk| format!("localhost:{}", sk.pg_port))
                 .collect::<Vec<String>>()

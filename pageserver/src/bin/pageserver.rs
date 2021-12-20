@@ -141,7 +141,7 @@ fn main() -> Result<()> {
             }
         }
     }
-    let conf = PageServerConf::parse_and_validate(&toml)?;
+    let conf = PageServerConf::parse_and_validate(&toml, workdir)?;
 
     // Set CWD to workdir for non-daemon modes
     env::set_current_dir(&workdir).with_context(|| {

@@ -71,21 +71,21 @@ pub struct PageServerNode {
 }
 
 impl PageServerNode {
-    pub fn from_env(env: &LocalEnv) -> PageServerNode {
-        let password = if env.pageserver.auth_type == AuthType::ZenithJWT {
-            &env.pageserver.auth_token
+    pub fn from_env(env: &LocalEnv) -> Self {
+        let password = if env.pageserver().auth_type() == AuthType::ZenithJWT {
+            env.pageserver().auth_token()
         } else {
             ""
         };
 
-        PageServerNode {
+        Self {
             pg_connection_config: Self::pageserver_connection_config(
                 password,
-                &env.pageserver.listen_pg_addr,
+                env.pageserver().listen_pg_addr(),
             ),
             env: env.clone(),
             http_client: Client::new(),
-            http_base_url: format!("http://{}/v1", env.pageserver.listen_http_addr),
+            http_base_url: format!("http://{}/v1", env.pageserver().listen_http_addr()),
         }
     }
 
@@ -102,22 +102,12 @@ impl PageServerNode {
         let mut args = vec![
             "--init".to_string(),
             "-D".to_string(),
-            self.env.base_data_dir.display().to_string(),
+            self.env.base_data_dir().display().to_string(),
             "-c".to_string(),
-            format!("pg_distrib_dir='{}'", self.env.pg_distrib_dir.display()),
+            format!("pg_distrib_dir='{}'", self.env.pg_distrib_dir().display()),
             "-c".to_string(),
-            format!("auth_type='{}'", self.env.pageserver.auth_type),
+            format!("auth_type='{}'", self.env.pageserver().auth_type()),
         ];
-
-        if self.env.pageserver.auth_type != AuthType::Trust {
-            args.extend([
-                "-c".to_string(),
-                format!(
-                    "auth_validation_public_key_path='{}'",
-                    self.env.base_data_dir.join("auth_public_key.pem").display()
-                ),
-            ]);
-        }
 
         if let Some(tenantid) = create_tenant {
             args.extend(["--create-tenant".to_string(), tenantid.to_string()])
@@ -134,12 +124,6 @@ impl PageServerNode {
             bail!("pageserver init failed");
         }
 
-        // Write pageserver.toml. This is kind of pointless because it will
-        // be overwritten on 'zenith start' anyway, but the overwritten file
-        // contains the warning about editing the file by hand, which is nice
-        // for humans.
-        self.write_pageserver_toml()?;
-
         Ok(())
     }
 
@@ -152,8 +136,8 @@ impl PageServerNode {
     }
 
     fn write_pageserver_toml(&self) -> anyhow::Result<()> {
-        let toml_path = self.env.base_data_dir.join("pageserver.toml");
-        std::fs::write(&toml_path, self.env.pageserver.toml_string()).with_context(|| {
+        let toml_path = self.env.base_data_dir().join("pageserver.toml");
+        std::fs::write(&toml_path, self.env.pageserver().toml_string()).with_context(|| {
             format!(
                 "Failed to write toml contents into '{}'",
                 toml_path.display()
@@ -306,8 +290,8 @@ impl PageServerNode {
 
     fn http_request<U: IntoUrl>(&self, method: Method, url: U) -> RequestBuilder {
         let mut builder = self.http_client.request(method, url);
-        if self.env.pageserver.auth_type == AuthType::ZenithJWT {
-            builder = builder.bearer_auth(&self.env.pageserver.auth_token)
+        if self.env.pageserver().auth_type() == AuthType::ZenithJWT {
+            builder = builder.bearer_auth(&self.env.pageserver().auth_token())
         }
         builder
     }

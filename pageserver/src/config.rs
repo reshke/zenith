@@ -13,7 +13,7 @@ use zenith_utils::zid::{ZTenantId, ZTimelineId};
 
 use std::env;
 use std::num::{NonZeroU32, NonZeroUsize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -213,7 +213,7 @@ impl PageServerConf {
     /// validating the input and failing on errors.
     ///
     /// This leaves any options not present in the file in the built-in defaults.
-    pub fn parse_and_validate(toml: &Document) -> Result<Self> {
+    pub fn parse_and_validate(toml: &Document, workdir: &Path) -> Result<Self> {
         use defaults::*;
 
         let mut conf = PageServerConf {
@@ -257,6 +257,8 @@ impl PageServerConf {
                     conf.auth_validation_public_key_path =
                         Some(PathBuf::from(parse_toml_string(key, item)?))
                 }
+                // TODO kb better docs?
+                "auth_token" => {}
                 "auth_type" => conf.auth_type = parse_toml_auth_type(key, item)?,
                 "remote_storage" => {
                     conf.remote_storage_config = Some(Self::parse_remote_storage_config(item)?)
@@ -266,17 +268,16 @@ impl PageServerConf {
         }
 
         if conf.auth_type == AuthType::ZenithJWT {
-            if let Some(path_ref) = &conf.auth_validation_public_key_path {
-                ensure!(
-                    path_ref.exists(),
-                    format!(
-                        "Can't find auth_validation_public_key at '{}'",
-                        path_ref.display()
-                    )
-                );
-            } else {
-                bail!("Missing auth_validation_public_key_path when auth_type is ZenithJWT");
-            }
+            let auth_validation_public_key_path = conf
+                .auth_validation_public_key_path
+                .get_or_insert_with(|| workdir.join("auth_public_key.pem"));
+            ensure!(
+                auth_validation_public_key_path.exists(),
+                format!(
+                    "Can't find auth_validation_public_key at '{}'",
+                    auth_validation_public_key_path.display()
+                )
+            );
         }
 
         if conf.pg_distrib_dir.is_empty() {
