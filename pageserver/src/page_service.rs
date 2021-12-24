@@ -325,8 +325,8 @@ impl PageServerHandler {
         let _enter = info_span!("pagestream", timeline = %timelineid, tenant = %tenantid).entered();
 
         // Check that the timeline exists
-        let timeline = tenant_mgr::get_timeline_for_tenant(tenantid, timelineid)
-            .context("Cannot handle pagerequests for a remote timeline")?;
+        let timeline = tenant_mgr::get_timeline_for_tenant_load(tenantid, timelineid)
+            .context("Cannot load local timeline")?;
 
         /* switch client to COPYBOTH */
         pgb.write_message(&BeMessage::CopyBothResponse)?;
@@ -521,8 +521,8 @@ impl PageServerHandler {
         let _enter = span.enter();
 
         // check that the timeline exists
-        let timeline = tenant_mgr::get_timeline_for_tenant(tenantid, timelineid)
-            .context("Cannot handle basebackup request for a remote timeline")?;
+        let timeline = tenant_mgr::get_timeline_for_tenant_load(tenantid, timelineid)
+            .context("Cannot load local timeline")?;
         let latest_gc_cutoff_lsn = timeline.get_latest_gc_cutoff_lsn();
         if let Some(lsn) = lsn {
             timeline
@@ -656,8 +656,8 @@ impl postgres_backend::Handler for PageServerHandler {
                 info_span!("callmemaybe", timeline = %timelineid, tenant = %tenantid).entered();
 
             // Check that the timeline exists
-            tenant_mgr::get_timeline_for_tenant(tenantid, timelineid)
-                .context("Failed to fetch local timeline for callmemaybe requests")?;
+            tenant_mgr::get_timeline_for_tenant_load(tenantid, timelineid)
+                .context("Cannot load local timeline")?;
 
             walreceiver::launch_wal_receiver(self.conf, tenantid, timelineid, &connstr)?;
 
@@ -721,12 +721,12 @@ impl postgres_backend::Handler for PageServerHandler {
 
             self.check_permission(None)?;
 
-            let tenantid = ZTenantId::from_str(caps.get(1).unwrap().as_str())?;
+            let _ = ZTenantId::from_str(caps.get(1).unwrap().as_str())?;
 
-            tenant_mgr::create_repository_for_tenant(self.conf, tenantid)?;
-
-            pgb.write_message_noflush(&SINGLE_COL_ROWDESC)?
-                .write_message_noflush(&BeMessage::CommandComplete(b"SELECT 1"))?;
+            // TODO (current) management api is removed from page_service see https://github.com/zenithdb/zenith/pull/1279
+            // waiting for rebase
+            // tenant_mgr::create_repository_for_tenant(self.conf, tenantid)?;
+            unimplemented!();
         } else if query_string.starts_with("status") {
             pgb.write_message_noflush(&SINGLE_COL_ROWDESC)?
                 .write_message_noflush(&HELLO_WORLD_ROW)?
@@ -837,8 +837,8 @@ impl postgres_backend::Handler for PageServerHandler {
             let tenantid = ZTenantId::from_str(caps.get(1).unwrap().as_str())?;
             let timelineid = ZTimelineId::from_str(caps.get(2).unwrap().as_str())?;
 
-            let timeline = tenant_mgr::get_timeline_for_tenant(tenantid, timelineid)
-                .context("Failed to fetch local timeline for checkpoint request")?;
+            let timeline = tenant_mgr::get_timeline_for_tenant_load(tenantid, timelineid)
+                .context("Cannot load local timeline")?;
 
             timeline.checkpoint(CheckpointConfig::Forced)?;
             pgb.write_message_noflush(&SINGLE_COL_ROWDESC)?

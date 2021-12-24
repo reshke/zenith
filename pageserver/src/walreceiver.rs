@@ -6,6 +6,7 @@
 //! We keep one WAL receiver active per timeline.
 
 use crate::config::PageServerConf;
+use crate::remote_storage::TimelineSyncId;
 use crate::tenant_mgr;
 use crate::thread_mgr;
 use crate::thread_mgr::ThreadKind;
@@ -19,6 +20,7 @@ use postgres_types::PgLsn;
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread_local;
 use std::time::SystemTime;
@@ -180,13 +182,16 @@ fn walreceiver_main(
     let end_of_wal = Lsn::from(u64::from(identify.xlogpos));
     let mut caught_up = false;
 
-    let timeline =
-        tenant_mgr::get_timeline_for_tenant(tenantid, timelineid).with_context(|| {
-            format!(
-                "Can not start the walrecever for a remote tenant {}, timeline {}",
-                tenantid, timelineid,
-            )
-        })?;
+    let repo = tenant_mgr::get_repository_for_tenant(tenantid)
+        .with_context(|| format!("no repository found for tenant {}", tenantid))?;
+    let timeline = repo.get_timeline_load(timelineid).with_context(|| {
+        format!(
+            "local timeline {} not found for tenant {}",
+            timelineid, tenantid
+        )
+    })?;
+
+    let remote_index = Arc::clone(repo.get_remote_index());
 
     //
     // Start streaming the WAL, from where we left off previously.
@@ -288,11 +293,17 @@ fn walreceiver_main(
         };
 
         if let Some(last_lsn) = status_update {
-            let timeline_synced_disk_consistent_lsn =
-                tenant_mgr::get_repository_for_tenant(tenantid)?
-                    .get_timeline_state(timelineid)
-                    .and_then(|state| state.remote_disk_consistent_lsn())
-                    .unwrap_or(Lsn(0));
+            let timeline_remote_consistent_lsn = runtime.block_on(async {
+                remote_index
+                    .read()
+                    .await
+                    .timeline_entry(&TimelineSyncId(tenantid, timelineid))
+                    .expect(
+                        "timeline was deleted from remote index while walreceiver is still active",
+                    )
+                    .disk_consistent_lsn()
+                    .unwrap_or(Lsn(0)) // no checkpoint was uploaded
+            });
 
             // The last LSN we processed. It is not guaranteed to survive pageserver crash.
             let write_lsn = u64::from(last_lsn);
@@ -300,7 +311,7 @@ fn walreceiver_main(
             let flush_lsn = u64::from(timeline.get_disk_consistent_lsn());
             // The last LSN that is synced to remote storage and is guaranteed to survive pageserver crash
             // Used by safekeepers to remove WAL preceding `remote_consistent_lsn`.
-            let apply_lsn = u64::from(timeline_synced_disk_consistent_lsn);
+            let apply_lsn = u64::from(timeline_remote_consistent_lsn);
             let ts = SystemTime::now();
 
             // Send zenith feedback message.
