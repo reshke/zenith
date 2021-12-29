@@ -319,7 +319,7 @@ def test_race_conditions(zenith_env_builder: ZenithEnvBuilder, stop_value):
 class ProposerPostgres(PgProtocol):
     """Object for running postgres without ZenithEnv"""
     def __init__(self,
-                 pgdata_dir: str,
+                 pgdata_dir: Path,
                  pg_bin,
                  timeline_id: str,
                  tenant_id: str,
@@ -327,7 +327,7 @@ class ProposerPostgres(PgProtocol):
                  port: int):
         super().__init__(host=listen_addr, port=port)
 
-        self.pgdata_dir: str = pgdata_dir
+        self.pgdata_dir: Path = pgdata_dir
         self.pg_bin: PgBin = pg_bin
         self.timeline_id: str = timeline_id
         self.tenant_id: str = tenant_id
@@ -336,11 +336,11 @@ class ProposerPostgres(PgProtocol):
 
     def pg_data_dir_path(self) -> str:
         """ Path to data directory """
-        return self.pgdata_dir
+        return str(self.pgdata_dir)
 
     def config_file_path(self) -> str:
         """ Path to postgresql.conf """
-        return os.path.join(self.pgdata_dir, 'postgresql.conf')
+        return str(self.pgdata_dir / 'postgresql.conf')
 
     def create_dir_config(self, wal_acceptors: str):
         """ Create dir and config for running --sync-safekeepers """
@@ -387,8 +387,8 @@ class ProposerPostgres(PgProtocol):
     def start(self):
         """ Start postgres with pg_ctl """
 
-        log_path = os.path.join(self.pg_data_dir_path(), "pg.log")
-        args = ["pg_ctl", "-D", self.pg_data_dir_path(), "-l", log_path, "-w", "start"]
+        log_path = self.pgdata_dir / "pg.log"
+        args = ["pg_ctl", "-D", self.pg_data_dir_path(), "-l", str(log_path), "-w", "start"]
         self.pg_bin.run(args)
 
     def stop(self):
@@ -412,7 +412,7 @@ def test_sync_safekeepers(zenith_env_builder: ZenithEnvBuilder,
     tenant_id = uuid.uuid4().hex
 
     # write config for proposer
-    pgdata_dir = os.path.join(env.repo_dir, "proposer_pgdata")
+    pgdata_dir = Path(env.repo_dir) / "proposer_pgdata"
     pg = ProposerPostgres(pgdata_dir,
                           pg_bin,
                           timeline_id,
@@ -488,11 +488,11 @@ class SafekeeperEnv:
                  port_distributor: PortDistributor,
                  pg_bin: PgBin,
                  num_safekeepers: int = 1):
-        self.repo_dir = repo_dir
-        self.port_distributor = port_distributor
-        self.pg_bin = pg_bin
-        self.num_safekeepers = num_safekeepers
-        self.bin_safekeeper = os.path.join(str(zenith_binpath), 'safekeeper')
+        self.repo_dir: Path = repo_dir
+        self.port_distributor: PortDistributor = port_distributor
+        self.pg_bin: PgBin = pg_bin
+        self.num_safekeepers: int = num_safekeepers
+        self.bin_safekeeper: Path = Path(zenith_binpath) / 'safekeeper'
         self.safekeepers: Optional[List[subprocess.CompletedProcess[Any]]] = None
         self.postgres: Optional[ProposerPostgres] = None
         self.tenant_id: Optional[str] = None
@@ -517,7 +517,7 @@ class SafekeeperEnv:
 
         return self
 
-    def start_safekeeper(self, i):
+    def start_safekeeper(self, i: int):
         port = SafekeeperPort(
             pg=self.port_distributor.get_port(),
             http=self.port_distributor.get_port(),
@@ -528,11 +528,11 @@ class SafekeeperEnv:
         else:
             name = f"sk{i}"
 
-        safekeeper_dir = os.path.join(self.repo_dir, name)
+        safekeeper_dir = str(self.repo_dir / name)
         mkdir_if_needed(safekeeper_dir)
 
         args = [
-            self.bin_safekeeper,
+            str(self.bin_safekeeper),
             "-l",
             f"127.0.0.1:{port.pg}",
             "--listen-http",
@@ -549,7 +549,7 @@ class SafekeeperEnv:
         return ','.join([sk_proc.args[2] for sk_proc in self.safekeepers])
 
     def create_postgres(self):
-        pgdata_dir = os.path.join(self.repo_dir, "proposer_pgdata")
+        pgdata_dir = Path(self.repo_dir) / "proposer_pgdata"
         pg = ProposerPostgres(pgdata_dir,
                               self.pg_bin,
                               self.timeline_id,
@@ -560,9 +560,9 @@ class SafekeeperEnv:
         pg.create_dir_config(self.get_safekeeper_connstrs())
         return pg
 
-    def kill_safekeeper(self, sk_dir):
+    def kill_safekeeper(self, sk_dir: Path):
         """Read pid file and kill process"""
-        pid_file = os.path.join(sk_dir, "safekeeper.pid")
+        pid_file = sk_dir / "safekeeper.pid"
         with open(pid_file, "r") as f:
             pid = int(f.read())
             log.info(f"Killing safekeeper with pid {pid}")
@@ -579,14 +579,14 @@ class SafekeeperEnv:
             self.postgres.stop()
         if self.safekeepers is not None:
             for sk_proc in self.safekeepers:
-                self.kill_safekeeper(sk_proc.args[6])
+                self.kill_safekeeper(Path(sk_proc.args[6]))
 
 
 def test_safekeeper_without_pageserver(test_output_dir: str,
                                        port_distributor: PortDistributor,
                                        pg_bin: PgBin):
     # Create the environment in the test-specific output dir
-    repo_dir = Path(os.path.join(test_output_dir, "repo"))
+    repo_dir = Path(test_output_dir) / "repo"
 
     env = SafekeeperEnv(
         repo_dir,
