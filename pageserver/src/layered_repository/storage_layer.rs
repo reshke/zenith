@@ -77,9 +77,10 @@ pub enum PageVersion {
 /// It can be None, if the first WAL record initializes the page (will_init)
 /// 'records' contains the records to apply over the base image.
 ///
+/// FIXME: caller can fill in page_img
 pub struct PageReconstructData {
     pub records: Vec<(Lsn, ZenithWalRecord)>,
-    pub page_img: Option<Bytes>,
+    pub page_img: Option<(Lsn, Bytes)>,
 }
 
 /// Return value from Layer::get_page_reconstruct_data
@@ -93,8 +94,6 @@ pub enum PageReconstructResult {
     /// the returned LSN. This is usually considered an error, but might be OK
     /// in some circumstances.
     Missing(Lsn),
-    /// Use the cached image at `cached_img_lsn` as the base image
-    Cached,
 }
 
 ///
@@ -140,6 +139,7 @@ pub trait Layer: Send + Sync {
     ///
     /// `cached_img_lsn` should be set to a cached page image's lsn < `lsn`.
     /// This function will only return data after `cached_img_lsn`.
+    /// FIXME
     ///
     /// See PageReconstructResult for possible return values. The collected data
     /// is appended to reconstruct_data; the caller should pass an empty struct
@@ -150,7 +150,6 @@ pub trait Layer: Send + Sync {
         &self,
         blknum: SegmentBlk,
         lsn: Lsn,
-        cached_img_lsn: Option<Lsn>,
         reconstruct_data: &mut PageReconstructData,
     ) -> Result<PageReconstructResult>;
 

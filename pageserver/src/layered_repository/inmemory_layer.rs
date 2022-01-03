@@ -174,7 +174,6 @@ impl Layer for InMemoryLayer {
         &self,
         blknum: SegmentBlk,
         lsn: Lsn,
-        cached_img_lsn: Option<Lsn>,
         reconstruct_data: &mut PageReconstructData,
     ) -> Result<PageReconstructResult> {
         let mut need_image = true;
@@ -191,9 +190,9 @@ impl Layer for InMemoryLayer {
                 .iter()
                 .rev();
             for (entry_lsn, pos) in iter {
-                match &cached_img_lsn {
-                    Some(cached_lsn) if entry_lsn <= cached_lsn => {
-                        return Ok(PageReconstructResult::Cached)
+                match &reconstruct_data.page_img {
+                    Some((cached_lsn, _)) if entry_lsn <= cached_lsn => {
+                        return Ok(PageReconstructResult::Complete)
                     }
                     _ => {}
                 }
@@ -201,7 +200,7 @@ impl Layer for InMemoryLayer {
                 let pv = inner.page_versions.read_pv(*pos)?;
                 match pv {
                     PageVersion::Page(img) => {
-                        reconstruct_data.page_img = Some(img);
+                        reconstruct_data.page_img = Some((*entry_lsn, img));
                         need_image = false;
                         break;
                     }
