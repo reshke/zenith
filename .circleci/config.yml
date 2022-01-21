@@ -321,6 +321,8 @@ jobs:
               cov_prefix=()
             fi
 
+            export FORCE_MOCK_S3=1
+
             # Run the tests.
             #
             # The junit.xml file allows CircleCI to display more fine-grained test information
