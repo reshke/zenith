@@ -167,6 +167,8 @@ def test_tenant_relocation(zenith_env_builder: ZenithEnvBuilder,
     with closing(env.pageserver.connect()) as psconn:
         with psconn.cursor() as pscur:
             pscur.execute(f"do_gc {tenant} {timeline}")
+            # TODO ensure checkpoint hit remote storage via api
+            time.sleep(5)
 
     # ensure upload is completed
     pageserver_http_client = env.pageserver.http_client()

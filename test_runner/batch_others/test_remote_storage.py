@@ -61,7 +61,7 @@ def test_remote_storage_backup_and_restore(zenith_env_builder: ZenithEnvBuilder,
         with psconn.cursor() as pscur:
             pscur.execute(f"do_gc {tenant_id} {timeline_id}")
     log.info("waiting for upload")  # TODO api to check if upload is done
-    time.sleep(2)
+    time.sleep(5)
 
     ##### Stop the first pageserver instance, erase all its data
     env.postgres.stop_all()
