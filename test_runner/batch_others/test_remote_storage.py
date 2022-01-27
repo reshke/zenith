@@ -78,7 +78,7 @@ def test_remote_storage_backup_and_restore(zenith_env_builder: ZenithEnvBuilder,
     client.timeline_attach(UUID(tenant_id), UUID(timeline_id))
     # FIXME cannot handle duplicate download requests (which might be caused by repeated timeline detail calls)
     #   subject to fix in https://github.com/zenithdb/zenith/issues/997
-    time.sleep(5)
+    time.sleep(10)
 
     log.info("waiting for timeline redownload")
     attempts = 0
@@ -93,7 +93,7 @@ def test_remote_storage_backup_and_restore(zenith_env_builder: ZenithEnvBuilder,
         if attempts > 10:
             raise Exception("timeline redownload failed")
         log.debug("still waiting")
-        time.sleep(1)
+        time.sleep(2)
 
     pg = env.postgres.create_start()
     with closing(pg.connect()) as conn:

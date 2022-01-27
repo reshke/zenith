@@ -195,11 +195,11 @@ def test_tenant_relocation(zenith_env_builder: ZenithEnvBuilder,
         # call to attach timeline to new pageserver
         new_pageserver_http_client.timeline_attach(UUID(tenant), UUID(timeline))
         # FIXME cannot handle duplicate download requests, subject to fix in https://github.com/zenithdb/zenith/issues/997
-        time.sleep(5)
+        time.sleep(10)
         # new pageserver should in sync (modulo wal tail or vacuum activity) with the old one because there was no new writes since checkpoint
         new_timeline_detail = wait_for(
             number_of_iterations=5,
-            interval=1,
+            interval=2,
             func=lambda: assert_local(new_pageserver_http_client, tenant, timeline))
         assert new_timeline_detail['timeline_state'].get('Ready'), new_timeline_detail
         # when load is active these checks can break because lsns are not static
