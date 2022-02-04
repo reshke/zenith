@@ -33,7 +33,6 @@ use zenith_utils::pq_proto::{
 use zenith_utils::zid::{ZTenantId, ZTimelineId};
 
 use crate::basebackup;
-use crate::branches;
 use crate::config::PageServerConf;
 use crate::relish::*;
 use crate::repository::Timeline;
@@ -662,49 +661,6 @@ impl postgres_backend::Handler for PageServerHandler {
             walreceiver::launch_wal_receiver(self.conf, tenantid, timelineid, &connstr)?;
 
             pgb.write_message_noflush(&BeMessage::CommandComplete(b"SELECT 1"))?;
-        } else if query_string.starts_with("branch_create ") {
-            let err = || format!("invalid branch_create: '{}'", query_string);
-
-            // branch_create <tenantid> <branchname> <startpoint>
-            // TODO lazy static
-            // TODO: escaping, to allow branch names with spaces
-            let re = Regex::new(r"^branch_create ([[:xdigit:]]+) (\S+) ([^\r\n\s;]+)[\r\n\s;]*;?$")
-                .unwrap();
-            let caps = re.captures(query_string).with_context(err)?;
-
-            let tenantid = ZTenantId::from_str(caps.get(1).unwrap().as_str())?;
-            let branchname = caps.get(2).with_context(err)?.as_str().to_owned();
-            let startpoint_str = caps.get(3).with_context(err)?.as_str().to_owned();
-
-            self.check_permission(Some(tenantid))?;
-
-            let _enter =
-                info_span!("branch_create", name = %branchname, tenant = %tenantid).entered();
-
-            let branch =
-                branches::create_branch(self.conf, &branchname, &startpoint_str, &tenantid)?;
-            let branch = serde_json::to_vec(&branch)?;
-
-            pgb.write_message_noflush(&SINGLE_COL_ROWDESC)?
-                .write_message_noflush(&BeMessage::DataRow(&[Some(&branch)]))?
-                .write_message_noflush(&BeMessage::CommandComplete(b"SELECT 1"))?;
-        } else if query_string.starts_with("branch_list ") {
-            // branch_list <zenith tenantid as hex string>
-            let re = Regex::new(r"^branch_list ([[:xdigit:]]+)$").unwrap();
-            let caps = re
-                .captures(query_string)
-                .with_context(|| format!("invalid branch_list: '{}'", query_string))?;
-
-            let tenantid = ZTenantId::from_str(caps.get(1).unwrap().as_str())?;
-
-            // since these handlers for tenant/branch commands are deprecated (in favor of http based ones)
-            // just use false in place of include non incremental logical size
-            let branches = crate::branches::get_branches(self.conf, &tenantid, false)?;
-            let branches_buf = serde_json::to_vec(&branches)?;
-
-            pgb.write_message_noflush(&SINGLE_COL_ROWDESC)?
-                .write_message_noflush(&BeMessage::DataRow(&[Some(&branches_buf)]))?
-                .write_message_noflush(&BeMessage::CommandComplete(b"SELECT 1"))?;
         } else if query_string.starts_with("tenant_list") {
             let tenants = crate::tenant_mgr::list_tenants()?;
             let tenants_buf = serde_json::to_vec(&tenants)?;
