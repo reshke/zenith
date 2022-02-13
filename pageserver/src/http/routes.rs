@@ -82,6 +82,7 @@ async fn timeline_create_handler(mut request: Request<Body>) -> Result<Response<
             request_data.tenant_id,
             request_data.timeline_id,
             request_data.start_lsn,
+            request_data.ancestor_timeline_id,
         )
     })
     .await

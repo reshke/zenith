@@ -10,6 +10,9 @@ pub struct TimelineCreateRequest {
     #[serde(with = "hex")]
     pub timeline_id: ZTimelineId,
     pub start_lsn: Option<Lsn>,
+    // TODO kb
+    // #[serde(with = "hex")]
+    pub ancestor_timeline_id: Option<ZTimelineId>,
 }
 
 #[derive(Serialize, Deserialize)]

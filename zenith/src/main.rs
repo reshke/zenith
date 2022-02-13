@@ -470,7 +470,13 @@ fn handle_timeline(timeline_match: &ArgMatches, env: &local_env::LocalEnv) -> Re
         let timeline_id = timeline_id
             .parse::<ZTimelineId>()
             .context("Failed to parse timeline id from the request")?;
-        let timeline = pageserver.timeline_create(tenant_id, timeline_id, start_lsn)?;
+        let ancestor_timeline_id = timeline_match
+            .value_of("ancestor-timeline-id")
+            .map(|id| id.parse::<ZTimelineId>())
+            .transpose()
+            .context("Failed to parse ancestor timeline id from the request")?;
+        let timeline =
+            pageserver.timeline_create(tenant_id, timeline_id, start_lsn, ancestor_timeline_id)?;
         println!(
             "Created timeline '{}' at {:?} for tenant: {}",
             timeline.timeline_id, timeline.latest_valid_lsn, tenant_id,

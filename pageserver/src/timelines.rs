@@ -252,69 +252,30 @@ pub(crate) fn get_timelines(
 }
 
 pub(crate) fn create_timeline(
-    conf: &PageServerConf,
+    conf: &'static PageServerConf,
     tenant_id: ZTenantId,
-    timeline_id: ZTimelineId,
+    new_timeline_id: ZTimelineId,
     start_lsn: Option<Lsn>,
+    ancestor_timeline_id: Option<ZTimelineId>,
 ) -> Result<TimelineInfo> {
-    if conf.timeline_path(&timeline_id, &tenant_id).exists() {
-        bail!("timeline {} already exists", timeline_id);
+    if conf.timeline_path(&new_timeline_id, &tenant_id).exists() {
+        bail!("timeline {} already exists", new_timeline_id);
     }
 
+    let lsn = start_lsn.unwrap_or(Lsn(0));
     let repo = tenant_mgr::get_repository_for_tenant(tenant_id)?;
-
-    let mut startpoint = PointInTime {
-        timeline_id,
-        lsn: start_lsn.unwrap_or(Lsn(0)),
-    };
-
-    let timeline = repo
-        .get_timeline(startpoint.timeline_id)?
-        .local_timeline()
-        .context("Cannot branch off the timeline that's not present locally")?;
-    if startpoint.lsn == Lsn(0) {
-        // Find end of WAL on the old timeline
-        let end_of_wal = timeline.get_last_record_lsn();
-        info!("branching at end of WAL: {}", end_of_wal);
-        startpoint.lsn = end_of_wal;
-    } else {
-        // Wait for the WAL to arrive and be processed on the parent branch up
-        // to the requested branch point. The repository code itself doesn't
-        // require it, but if we start to receive WAL on the new timeline,
-        // decoding the new WAL might need to look up previous pages, relation
-        // sizes etc. and that would get confused if the previous page versions
-        // are not in the repository yet.
-        timeline.wait_lsn(startpoint.lsn)?;
+    match ancestor_timeline_id {
+        Some(ancestor_timeline_id) => {
+            repo.branch_timeline(ancestor_timeline_id, new_timeline_id, lsn)?;
+        }
+        None => bootstrap_timeline(conf, tenant_id, new_timeline_id, repo.as_ref())?,
     }
-    startpoint.lsn = startpoint.lsn.align();
-    if timeline.get_ancestor_lsn() > startpoint.lsn {
-        // can we safely just branch from the ancestor instead?
-        bail!(
-            "invalid startpoint {} for the timeline {}: less than timeline ancestor lsn {:?}",
-            startpoint.lsn,
-            timeline_id,
-            timeline.get_ancestor_lsn()
-        );
-    }
-
-    let new_timeline_id = ZTimelineId::generate();
-
-    // Forward entire timeline creation routine to repository
-    // backend, so it can do all needed initialization
-    repo.branch_timeline(startpoint.timeline_id, new_timeline_id, startpoint.lsn)?;
-
-    // Remember the human-readable branch name for the new timeline.
-    // FIXME: there's a race condition, if you create a branch with the same
-    // name concurrently.
-    // TODO kb timeline creation needs more
-    let data = new_timeline_id.to_string();
-    fs::write(conf.timeline_path(&timeline_id, &tenant_id), data)?;
 
     Ok(TimelineInfo {
         timeline_id: new_timeline_id,
-        latest_valid_lsn: startpoint.lsn,
-        ancestor_id: Some(startpoint.timeline_id.to_string()),
-        ancestor_lsn: Some(startpoint.lsn.to_string()),
+        latest_valid_lsn: lsn,
+        ancestor_id: ancestor_timeline_id.map(|id| id.to_string()),
+        ancestor_lsn: start_lsn.map(|lsn| lsn.to_string()),
         current_logical_size: 0,
         current_logical_size_non_incremental: Some(0),
     })

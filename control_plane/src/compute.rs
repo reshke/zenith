@@ -80,7 +80,6 @@ impl ComputeControlPlane {
         timeline_spec: Option<&str>,
         port: Option<u16>,
     ) -> Result<Arc<PostgresNode>> {
-        // Resolve the human-readable timeline spec into timeline ID and LSN
         let (timelineid, lsn) = match timeline_spec {
             Some(timeline_spec) => parse_point_in_time(timeline_spec)?,
             None => (ZTimelineId::generate(), None),
