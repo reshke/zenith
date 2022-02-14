@@ -540,19 +540,15 @@ auth_type = '{pageserver_auth_type}'
                 pg=self.port_distributor.get_port(),
                 http=self.port_distributor.get_port(),
             )
-
-            if config.num_safekeepers == 1:
-                name = "single"
-            else:
-                name = f"sk{i}"
+            id = i  # assign ids sequentially
             toml += f"""
 [[safekeepers]]
-name = '{name}'
+id = {id}
 pg_port = {port.pg}
 http_port = {port.http}
 sync = false # Disable fsyncs to make the tests go faster
             """
-            safekeeper = Safekeeper(env=self, name=name, port=port)
+            safekeeper = Safekeeper(env=self, id=id, port=port)
             self.safekeepers.append(safekeeper)
 
         log.info(f"Config: {toml}")
@@ -1217,11 +1213,11 @@ class Safekeeper:
     """ An object representing a running safekeeper daemon. """
     env: ZenithEnv
     port: SafekeeperPort
-    name: str  # identifier for logging
+    id: int
     auth_token: Optional[str] = None
 
     def start(self) -> 'Safekeeper':
-        self.env.zenith_cli(['safekeeper', 'start', self.name])
+        self.env.zenith_cli(['safekeeper', 'start', str(self.id)])
 
         # wait for wal acceptor start by checking its status
         started_at = time.time()
@@ -1243,9 +1239,9 @@ class Safekeeper:
         cmd = ['safekeeper', 'stop']
         if immediate:
             cmd.extend(['-m', 'immediate'])
-        cmd.append(self.name)
+        cmd.append(str(self.id))
 
-        log.info('Stopping safekeeper {}'.format(self.name))
+        log.info('Stopping safekeeper {}'.format(self.id))
         self.env.zenith_cli(cmd)
         return self
 

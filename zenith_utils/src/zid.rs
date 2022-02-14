@@ -221,6 +221,10 @@ impl fmt::Display for ZTenantTimelineId {
     }
 }
 
+// Unique ID of a storage node (safekeeper or pageserver). Supposed to be
+// sequentially issued by the console.
+pub type ZNodeId = u64;
+
 #[cfg(test)]
 mod tests {
     use std::fmt::Display;
