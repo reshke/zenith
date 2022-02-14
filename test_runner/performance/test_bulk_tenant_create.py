@@ -32,7 +32,7 @@ def test_bulk_tenant_create(
     for i in range(tenants_count):
         start = timeit.default_timer()
 
-        tenant = env.create_tenant()
+        tenant = env.zenith_cli.create_tenant()
         env.zenith_cli.create_branch(
             f"test_bulk_tenant_create_{tenants_count}_{i}_{use_wal_acceptors}",
             "main",

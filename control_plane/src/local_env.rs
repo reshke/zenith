@@ -5,6 +5,7 @@
 
 use anyhow::{bail, Context};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::env;
 use std::fmt::Write;
 use std::fs;
@@ -12,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use zenith_utils::auth::{encode_from_key_file, Claims, Scope};
 use zenith_utils::postgres_backend::AuthType;
-use zenith_utils::zid::{opt_display_serde, ZTenantId};
+use zenith_utils::zid::{opt_display_serde, ZTenantId, ZTimelineId};
 
 //
 // This data structures represents zenith CLI config
@@ -57,6 +58,11 @@ pub struct LocalEnv {
 
     #[serde(default)]
     pub safekeepers: Vec<SafekeeperConf>,
+
+    /// Every tenant has a first timeline created for it, currently the only one ancestor-less for this tenant.
+    /// It is used as a default timeline for branching, if no ancestor timeline is specified.
+    #[serde(default)]
+    pub initial_timelines: HashMap<ZTenantId, ZTimelineId>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

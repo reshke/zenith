@@ -668,6 +668,7 @@ impl postgres_backend::Handler for PageServerHandler {
             pgb.write_message_noflush(&SINGLE_COL_ROWDESC)?
                 .write_message_noflush(&BeMessage::DataRow(&[Some(&tenants_buf)]))?
                 .write_message_noflush(&BeMessage::CommandComplete(b"SELECT 1"))?;
+        // TODO kb for test_auth.py and similar, I have to add timeline manipulation commands too?
         } else if query_string.starts_with("tenant_create") {
             let err = || format!("invalid tenant_create: '{}'", query_string);
 

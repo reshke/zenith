@@ -322,7 +322,7 @@ impl PageServerNode {
             .json()?)
     }
 
-    pub fn tenant_create(&self, tenantid: ZTenantId) -> Result<()> {
+    pub fn tenant_create(&self, tenantid: ZTenantId) -> Result<ZTimelineId> {
         Ok(self
             .http_request(Method::POST, format!("{}/{}", self.http_base_url, "tenant"))
             .json(&TenantCreateRequest {

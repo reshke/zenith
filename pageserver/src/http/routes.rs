@@ -81,8 +81,8 @@ async fn timeline_create_handler(mut request: Request<Body>) -> Result<Response<
             get_config(&request),
             request_data.tenant_id,
             request_data.timeline_id,
-            request_data.start_lsn,
             request_data.ancestor_timeline_id,
+            request_data.start_lsn,
         )
     })
     .await
@@ -246,13 +246,13 @@ async fn tenant_create_handler(mut request: Request<Body>) -> Result<Response<Bo
 
     let request_data: TenantCreateRequest = json_request(&mut request).await?;
 
-    tokio::task::spawn_blocking(move || {
+    let initial_timeline_id = tokio::task::spawn_blocking(move || {
         let _enter = info_span!("tenant_create", tenant = %request_data.tenant_id).entered();
         tenant_mgr::create_repository_for_tenant(get_config(&request), request_data.tenant_id)
     })
     .await
     .map_err(ApiError::from_err)??;
-    Ok(json_response(StatusCode::CREATED, ())?)
+    Ok(json_response(StatusCode::CREATED, initial_timeline_id)?)
 }
 
 async fn handler_404(_: Request<Body>) -> Result<Response<Body>, ApiError> {

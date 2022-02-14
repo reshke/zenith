@@ -41,14 +41,14 @@ def test_cli_branch_list(zenith_simple_env: ZenithEnv):
     page_server_cur = page_server_conn.cursor()
 
     # Initial sanity check
-    helper_compare_branch_list(page_server_cur, env, env.initial_tenant)
+    helper_compare_branch_list(page_server_cur, env, env.initial_tenant.hex)
     res = env.zenith_cli.create_branch("test_cli_branch_list_main", "empty")
-    helper_compare_branch_list(page_server_cur, env, env.initial_tenant)
+    helper_compare_branch_list(page_server_cur, env, env.initial_tenant.hex)
 
     # Create a nested branch
     res = env.zenith_cli.create_branch("test_cli_branch_list_nested", "test_cli_branch_list_main")
     assert res.stderr == ''
-    helper_compare_branch_list(page_server_cur, env, env.initial_tenant)
+    helper_compare_branch_list(page_server_cur, env, env.initial_tenant.hex)
 
     # Check that all new branches are visible via CLI
     res = env.zenith_cli.list_branches()

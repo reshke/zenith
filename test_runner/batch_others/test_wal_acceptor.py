@@ -679,7 +679,7 @@ def test_replace_safekeeper(zenith_env_builder: ZenithEnvBuilder):
     show_statuses(env.safekeepers, tenant_id, timeline_id)
 
     log.info("Recreate postgres to replace failed sk1 with new sk4")
-    pg.stop_and_destroy().create('test_replace_safekeeper')
+    pg.stop_and_destroy().create('test_replace_safekeeper', timeline=timeline_id)
     active_safekeepers = ['sk2', 'sk3', 'sk4']
     env.safekeepers[3].start()
     pg.adjust_for_wal_acceptors(safekeepers_guc(env, active_safekeepers))

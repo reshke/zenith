@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
-use zenith_utils::{lsn::Lsn, zid::ZTimelineId};
-
-use crate::ZTenantId;
+use zenith_utils::{
+    lsn::Lsn,
+    zid::{opt_display_serde, ZTenantId, ZTimelineId},
+};
 
 #[derive(Serialize, Deserialize)]
 pub struct TimelineCreateRequest {
@@ -9,10 +10,9 @@ pub struct TimelineCreateRequest {
     pub tenant_id: ZTenantId,
     #[serde(with = "hex")]
     pub timeline_id: ZTimelineId,
-    pub start_lsn: Option<Lsn>,
-    // TODO kb
-    // #[serde(with = "hex")]
+    #[serde(with = "opt_display_serde")]
     pub ancestor_timeline_id: Option<ZTimelineId>,
+    pub start_lsn: Option<Lsn>,
 }
 
 #[derive(Serialize, Deserialize)]

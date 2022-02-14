@@ -12,8 +12,8 @@ def test_tenants_normal_work(zenith_env_builder: ZenithEnvBuilder, with_wal_acce
 
     env = zenith_env_builder.init()
     """Tests tenants with and without wal acceptors"""
-    tenant_1 = env.create_tenant()
-    tenant_2 = env.create_tenant()
+    tenant_1 = env.zenith_cli.create_tenant()
+    tenant_2 = env.zenith_cli.create_tenant()
 
     env.zenith_cli.create_branch(f"test_tenants_normal_work_with_wal_acceptors{with_wal_acceptors}",
                                  "main",

@@ -76,7 +76,7 @@ pub fn create_repo(
     conf: &'static PageServerConf,
     tenantid: ZTenantId,
     wal_redo_manager: Arc<dyn WalRedoManager + Send + Sync>,
-) -> Result<Arc<dyn Repository>> {
+) -> Result<(ZTimelineId, Arc<dyn Repository>)> {
     let repo_dir = conf.tenant_path(&tenantid);
     if repo_dir.exists() {
         bail!("repo for {} already exists", tenantid)
@@ -108,7 +108,7 @@ pub fn create_repo(
     //      move data loading out of create_repo()
     bootstrap_timeline(conf, tenantid, timeline_id, repo.as_ref())?;
 
-    Ok(repo)
+    Ok((timeline_id, repo))
 }
 
 // Returns checkpoint LSN from controlfile
@@ -255,27 +255,65 @@ pub(crate) fn create_timeline(
     conf: &'static PageServerConf,
     tenant_id: ZTenantId,
     new_timeline_id: ZTimelineId,
-    start_lsn: Option<Lsn>,
     ancestor_timeline_id: Option<ZTimelineId>,
+    ancestor_start_lsn: Option<Lsn>,
 ) -> Result<TimelineInfo> {
     if conf.timeline_path(&new_timeline_id, &tenant_id).exists() {
         bail!("timeline {} already exists", new_timeline_id);
     }
 
-    let lsn = start_lsn.unwrap_or(Lsn(0));
     let repo = tenant_mgr::get_repository_for_tenant(tenant_id)?;
+    let mut start_lsn = ancestor_start_lsn.unwrap_or(Lsn(0));
+
     match ancestor_timeline_id {
         Some(ancestor_timeline_id) => {
-            repo.branch_timeline(ancestor_timeline_id, new_timeline_id, lsn)?;
+            let ancestor_timeline = repo
+                .get_timeline(ancestor_timeline_id)
+                .with_context(|| format!("Cannot get ancestor timeline {}", ancestor_timeline_id))?
+                .local_timeline()
+                .with_context(|| {
+                    format!(
+                        "Cannot branch off the timeline {} that's not present locally",
+                        ancestor_timeline_id
+                    )
+                })?;
+
+            if start_lsn == Lsn(0) {
+                // Find end of WAL on the old timeline
+                let end_of_wal = ancestor_timeline.get_last_record_lsn();
+                info!("branching at end of WAL: {}", end_of_wal);
+                start_lsn = end_of_wal;
+            } else {
+                // Wait for the WAL to arrive and be processed on the parent branch up
+                // to the requested branch point. The repository code itself doesn't
+                // require it, but if we start to receive WAL on the new timeline,
+                // decoding the new WAL might need to look up previous pages, relation
+                // sizes etc. and that would get confused if the previous page versions
+                // are not in the repository yet.
+                ancestor_timeline.wait_lsn(start_lsn)?;
+            }
+            start_lsn = start_lsn.align();
+
+            let ancestor_ancestor_lsn = ancestor_timeline.get_ancestor_lsn();
+            if ancestor_ancestor_lsn > start_lsn {
+                // can we safely just branch from the ancestor instead?
+                anyhow::bail!(
+                    "invalid start lsn {} for ancestor timeline {}: less than timeline ancestor lsn {}",
+                    start_lsn,
+                    ancestor_timeline_id,
+                    ancestor_ancestor_lsn,
+                );
+            }
+            repo.branch_timeline(ancestor_timeline_id, new_timeline_id, start_lsn)?;
         }
         None => bootstrap_timeline(conf, tenant_id, new_timeline_id, repo.as_ref())?,
     }
 
     Ok(TimelineInfo {
         timeline_id: new_timeline_id,
-        latest_valid_lsn: lsn,
+        latest_valid_lsn: start_lsn,
         ancestor_id: ancestor_timeline_id.map(|id| id.to_string()),
-        ancestor_lsn: start_lsn.map(|lsn| lsn.to_string()),
+        ancestor_lsn: ancestor_start_lsn.map(|lsn| lsn.to_string()),
         current_logical_size: 0,
         current_logical_size_non_incremental: Some(0),
     })

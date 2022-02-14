@@ -56,11 +56,11 @@ def test_readonly_node(zenith_simple_env: ZenithEnv):
 
     # Create first read-only node at the point where only 100 rows were inserted
     pg_hundred = env.postgres.create_start("test_readonly_node_hundred",
-                                           branch=f'test_readonly_node@{lsn_a}')
+                                           timeline=f'test_readonly_node@{lsn_a}')
 
     # And another at the point where 200100 rows were inserted
     pg_more = env.postgres.create_start("test_readonly_node_more",
-                                        branch=f'test_readonly_node@{lsn_b}')
+                                        timeline=f'test_readonly_node@{lsn_b}')
 
     # On the 'hundred' node, we should see only 100 rows
     hundred_pg_conn = pg_hundred.connect()
@@ -80,7 +80,7 @@ def test_readonly_node(zenith_simple_env: ZenithEnv):
 
     # Check creating a node at segment boundary
     pg = env.postgres.create_start("test_branch_segment_boundary",
-                                   branch="test_readonly_node@0/3000000")
+                                   timeline="test_readonly_node@0/3000000")
     cur = pg.connect().cursor()
     cur.execute('SELECT 1')
     assert cur.fetchone() == (1, )
