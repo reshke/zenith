@@ -115,10 +115,11 @@ def test_branch_behind(zenith_env_builder: ZenithEnvBuilder):
 
     # branch at pre-initdb lsn
     with pytest.raises(Exception, match="invalid branch start lsn"):
-        env.zenith_cli.create_timeline(ancestor_start_lsn="0/42")
+        env.zenith_cli.create_timeline(ancestor_timeline_id=env.initial_timeline,
+                                       ancestor_start_lsn="0/42")
 
     # branch at pre-ancestor lsn
-    with pytest.raises(Exception, match="less than timeline ancestor lsn"):
+    with pytest.raises(Exception, match="invalid branch start lsn"):
         env.zenith_cli.create_timeline(ancestor_timeline_id=test_branch_behind_timeline_id,
                                        ancestor_start_lsn="0/42")
 

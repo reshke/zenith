@@ -679,10 +679,14 @@ class ZenithPageserverHttpClient(requests.Session):
                         ancestor_timeline_id: Optional[uuid.UUID] = None) -> Dict[Any, Any]:
         res = self.post(f"http://localhost:{self.port}/v1/timeline",
                         json={
-                            'tenant_id': tenant_id.hex,
-                            'timeline_id': timeline_id,
-                            'start_lsn': start_lsn,
-                            'ancestor_timeline_id': ancestor_timeline_id,
+                            'tenant_id':
+                            tenant_id.hex,
+                            'timeline_id':
+                            timeline_id.hex,
+                            'start_lsn':
+                            start_lsn,
+                            'ancestor_timeline_id':
+                            ancestor_timeline_id.hex if ancestor_timeline_id else None,
                         })
         res.raise_for_status()
         res_json = res.json()
@@ -715,7 +719,8 @@ class ZenithPageserverHttpClient(requests.Session):
 
     def timeline_detail(self, tenant_id: uuid.UUID, timeline_id: uuid.UUID) -> Dict[Any, Any]:
         res = self.get(
-            f"http://localhost:{self.port}/v1/timeline/{tenant_id.hex}/{timeline_id.hex}")
+            f"http://localhost:{self.port}/v1/timeline/{tenant_id.hex}/{timeline_id.hex}?include-non-incremental-logical-size=1"
+        )
         res.raise_for_status()
         res_json = res.json()
         assert isinstance(res_json, dict)
@@ -803,13 +808,17 @@ class ZenithCli:
         else:
             return uuid.UUID(new_timeline_id)
 
-    def list_timelines(self,
-                       tenant_id: Optional[uuid.UUID] = None) -> 'subprocess.CompletedProcess[str]':
+    def list_timelines(self, tenant_id: Optional[uuid.UUID] = None) -> List[str]:
         res = self.raw_cli(
             ['timeline', 'list', '--tenantid', (tenant_id or self.env.initial_tenant).hex])
-        return res
+        branches_cli = sorted(
+            map(lambda b: b.split(') ')[-1].strip().split(':')[-1].strip(),
+                res.stdout.strip().split("\n")))
+        return branches_cli
 
-    def init(self, config_toml: str) -> 'subprocess.CompletedProcess[str]':
+    def init(self, config_toml: str) -> uuid.UUID:
+        initial_timeline = None
+
         with tempfile.NamedTemporaryFile(mode='w+') as tmp:
             tmp.write(config_toml)
             tmp.flush()
@@ -817,7 +826,18 @@ class ZenithCli:
             cmd = ['init', f'--config={tmp.name}']
             append_pageserver_param_overrides(cmd, self.env.pageserver.remote_storage)
 
-            return self.raw_cli(cmd)
+            completed_process = self.raw_cli(cmd)
+            completed_process.check_returncode()
+            init_timeline_id_extractor = re.compile(
+                r'^created initial timeline (?P<timeline_id>[^\s]+)\s', re.MULTILINE)
+            matches = init_timeline_id_extractor.search(completed_process.stdout)
+            if matches is not None:
+                initial_timeline = matches.group('timeline_id')
+
+        if initial_timeline is None:
+            raise Exception('could not find timeline id after `zenith init` invocation')
+        else:
+            return uuid.UUID(initial_timeline)
 
     def pageserver_start(self) -> 'subprocess.CompletedProcess[str]':
         start_args = ['pageserver', 'start']
@@ -874,7 +894,7 @@ class ZenithCli:
             f'--tenantid={(tenant_id or self.env.initial_tenant).hex}',
         ]
         if lsn is not None:
-            args.append(f'--port={lsn}')
+            args.append(f'--lsn={lsn}')
         if port is not None:
             args.append(f'--port={port}')
         args.extend([node_name, (timeline_id or self.env.initial_timeline).hex])
@@ -889,7 +909,7 @@ class ZenithCli:
         tenant_id: Optional[uuid.UUID] = None,
         destroy=False,
     ) -> 'subprocess.CompletedProcess[str]':
-        args = ['pg', 'stop', node_name, f'--tenantid={(tenant_id or self.env.initial_tenant).hex}']
+        args = ['pg', 'stop', f'--tenantid={(tenant_id or self.env.initial_tenant).hex}']
         if destroy:
             args.append('--destroy')
         args.append(node_name)

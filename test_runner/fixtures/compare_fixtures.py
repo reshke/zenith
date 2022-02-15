@@ -95,7 +95,7 @@ class ZenithCompare(PgCompare):
 
     def report_size(self) -> None:
         timeline_size = self.zenbenchmark.get_timeline_size(self.env.repo_dir,
-                                                            self.env.initial_tenant.hex,
+                                                            self.env.initial_tenant,
                                                             self.timeline)
         self.zenbenchmark.record('size',
                                  timeline_size / (1024 * 1024),

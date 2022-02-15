@@ -17,15 +17,12 @@ def helper_compare_timeline_list(page_server_cur: PgCursor,
     Filters out timelines created by other tests.
     """
 
-    res = env.zenith_cli.list_timelines()
-    timelines_cli = sorted(map(lambda b: b.split(':')[-1].strip(), res.stdout.strip().split("\n")))
+    timelines_cli = env.zenith_cli.list_timelines()
     timelines_cli = [
         b for b in timelines_cli if b.startswith('test_cli_') or b in ('empty', 'main')
     ]
 
-    res = env.zenith_cli.list_timelines(initial_tenant)
-    timelines_cli_with_tenant_arg = sorted(
-        map(lambda b: b.split(':')[-1].strip(), res.stdout.strip().split("\n")))
+    timelines_cli_with_tenant_arg = env.zenith_cli.list_timelines(initial_tenant)
     timelines_cli_with_tenant_arg = [
         b for b in timelines_cli if b.startswith('test_cli_') or b in ('empty', 'main')
     ]
@@ -33,7 +30,7 @@ def helper_compare_timeline_list(page_server_cur: PgCursor,
     assert timelines_cli == timelines_cli_with_tenant_arg
 
 
-def test_cli_branch_list(zenith_simple_env: ZenithEnv):
+def test_cli_timeline_list(zenith_simple_env: ZenithEnv):
     env = zenith_simple_env
     page_server_conn = env.pageserver.connect()
     page_server_cur = page_server_conn.cursor()
@@ -42,19 +39,18 @@ def test_cli_branch_list(zenith_simple_env: ZenithEnv):
     helper_compare_timeline_list(page_server_cur, env, env.initial_tenant)
 
     # Create a branch for us
-    new_timeline_id = env.zenith_cli.create_timeline()
+    main_timeline_id = env.zenith_cli.create_timeline()
     helper_compare_timeline_list(page_server_cur, env, env.initial_tenant)
 
     # Create a nested branch
-    new_timeline_id = env.zenith_cli.create_timeline(ancestor_timeline_id=new_timeline_id)
+    nested_timeline_id = env.zenith_cli.create_timeline(ancestor_timeline_id=main_timeline_id)
     helper_compare_timeline_list(page_server_cur, env, env.initial_tenant)
 
     # Check that all new branches are visible via CLI
-    res = env.zenith_cli.list_timelines()
-    branches_cli = sorted(map(lambda b: b.split(':')[-1].strip(), res.stdout.strip().split("\n")))
+    timelines_cli = env.zenith_cli.list_timelines()
 
-    assert 'test_cli_branch_list_main' in branches_cli
-    assert 'test_cli_branch_list_nested' in branches_cli
+    assert main_timeline_id.hex in timelines_cli
+    assert nested_timeline_id.hex in timelines_cli
 
 
 def helper_compare_tenant_list(page_server_cur: PgCursor, env: ZenithEnv):
@@ -77,14 +73,14 @@ def test_cli_tenant_list(zenith_simple_env: ZenithEnv):
     helper_compare_tenant_list(page_server_cur, env)
 
     # Create new tenant
-    tenant1 = uuid.uuid4().hex
+    tenant1 = uuid.uuid4()
     env.zenith_cli.create_tenant(tenant_id=tenant1)
 
     # check tenant1 appeared
     helper_compare_tenant_list(page_server_cur, env)
 
     # Create new tenant
-    tenant2 = uuid.uuid4().hex
+    tenant2 = uuid.uuid4()
     env.zenith_cli.create_tenant(tenant_id=tenant2)
 
     # check tenant2 appeared

@@ -199,7 +199,7 @@ def test_tenant_relocation(zenith_env_builder: ZenithEnvBuilder,
         new_timeline_detail = wait_for(
             number_of_iterations=5,
             interval=1,
-            func=lambda: assert_local(new_pageserver_http_client, tenant.hex, timeline.hex))
+            func=lambda: assert_local(new_pageserver_http_client, tenant, timeline))
         assert new_timeline_detail['timeline_state'].get('Ready'), new_timeline_detail
         # when load is active these checks can break because lsns are not static
         # so lets check with some margin

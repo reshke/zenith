@@ -19,23 +19,132 @@ use tracing::*;
 use zenith_utils::crashsafe_dir;
 use zenith_utils::logging;
 use zenith_utils::lsn::Lsn;
-use zenith_utils::zid::{ZTenantId, ZTimelineId};
+use zenith_utils::zid::{opt_display_serde, ZTenantId, ZTimelineId};
 
 use crate::walredo::WalRedoManager;
-use crate::CheckpointConfig;
 use crate::{config::PageServerConf, repository::Repository};
 use crate::{import_datadir, LOG_FILE_NAME};
 use crate::{repository::RepositoryTimeline, tenant_mgr};
+use crate::{repository::Timeline, CheckpointConfig};
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct TimelineInfo {
-    #[serde(with = "hex")]
-    pub timeline_id: ZTimelineId,
-    pub latest_valid_lsn: Lsn,
-    pub ancestor_id: Option<String>,
-    pub ancestor_lsn: Option<String>,
-    pub current_logical_size: usize,
-    pub current_logical_size_non_incremental: Option<usize>,
+#[serde(tag = "type")]
+pub enum TimelineInfo {
+    Local {
+        #[serde(with = "hex")]
+        timeline_id: ZTimelineId,
+        #[serde(with = "hex")]
+        tenant_id: ZTenantId,
+        last_record_lsn: Lsn,
+        prev_record_lsn: Lsn,
+        #[serde(with = "opt_display_serde")]
+        ancestor_timeline_id: Option<ZTimelineId>,
+        ancestor_lsn: Option<Lsn>,
+        disk_consistent_lsn: Lsn,
+        current_logical_size: usize,
+        current_logical_size_non_incremental: Option<usize>,
+    },
+    Remote {
+        #[serde(with = "hex")]
+        timeline_id: ZTimelineId,
+        #[serde(with = "hex")]
+        tenant_id: ZTenantId,
+        disk_consistent_lsn: Lsn,
+    },
+}
+
+impl TimelineInfo {
+    pub fn from_repo_timeline(
+        tenant_id: ZTenantId,
+        repo_timeline: RepositoryTimeline,
+        include_non_incremental_logical_size: bool,
+    ) -> Self {
+        match repo_timeline {
+            RepositoryTimeline::Local { id, timeline } => {
+                let ancestor_timeline_id = timeline.get_ancestor_timeline_id();
+                let ancestor_lsn = if ancestor_timeline_id.is_some() {
+                    Some(timeline.get_ancestor_lsn())
+                } else {
+                    None
+                };
+
+                Self::Local {
+                    timeline_id: id,
+                    tenant_id,
+                    last_record_lsn: timeline.get_last_record_lsn(),
+                    prev_record_lsn: timeline.get_prev_record_lsn(),
+                    ancestor_timeline_id,
+                    ancestor_lsn,
+                    disk_consistent_lsn: timeline.get_disk_consistent_lsn(),
+                    current_logical_size: timeline.get_current_logical_size(),
+                    current_logical_size_non_incremental: get_current_logical_size_non_incremental(
+                        include_non_incremental_logical_size,
+                        timeline.as_ref(),
+                    ),
+                }
+            }
+            RepositoryTimeline::Remote {
+                id,
+                disk_consistent_lsn,
+            } => Self::Remote {
+                timeline_id: id,
+                tenant_id,
+                disk_consistent_lsn,
+            },
+        }
+    }
+
+    pub fn from_dyn_timeline(
+        tenant_id: ZTenantId,
+        timeline_id: ZTimelineId,
+        timeline: &dyn Timeline,
+        include_non_incremental_logical_size: bool,
+    ) -> Self {
+        let ancestor_timeline_id = timeline.get_ancestor_timeline_id();
+        let ancestor_lsn = if ancestor_timeline_id.is_some() {
+            Some(timeline.get_ancestor_lsn())
+        } else {
+            None
+        };
+
+        Self::Local {
+            timeline_id,
+            tenant_id,
+            last_record_lsn: timeline.get_last_record_lsn(),
+            prev_record_lsn: timeline.get_prev_record_lsn(),
+            ancestor_timeline_id,
+            ancestor_lsn,
+            disk_consistent_lsn: timeline.get_disk_consistent_lsn(),
+            current_logical_size: timeline.get_current_logical_size(),
+            current_logical_size_non_incremental: get_current_logical_size_non_incremental(
+                include_non_incremental_logical_size,
+                timeline,
+            ),
+        }
+    }
+
+    pub fn timeline_id(&self) -> ZTimelineId {
+        match *self {
+            TimelineInfo::Local { timeline_id, .. } => timeline_id,
+            TimelineInfo::Remote { timeline_id, .. } => timeline_id,
+        }
+    }
+}
+
+fn get_current_logical_size_non_incremental(
+    include_non_incremental_logical_size: bool,
+    timeline: &dyn Timeline,
+) -> Option<usize> {
+    if !include_non_incremental_logical_size {
+        return None;
+    }
+    match timeline.get_current_logical_size_non_incremental(timeline.get_last_record_lsn()) {
+        Ok(size) => Some(size),
+        Err(e) => {
+            error!("Failed to get non-incremental logical size: {:?}", e);
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -161,7 +270,7 @@ fn bootstrap_timeline(
     tenantid: ZTenantId,
     tli: ZTimelineId,
     repo: &dyn Repository,
-) -> Result<()> {
+) -> Result<Arc<dyn Timeline>> {
     let _enter = info_span!("bootstrapping", timeline = %tli, tenant = %tenantid).entered();
 
     let initdb_path = conf.tenant_path(&tenantid).join("tmp");
@@ -193,7 +302,7 @@ fn bootstrap_timeline(
     // Remove temp dir. We don't need it anymore
     fs::remove_dir_all(pgdata_path)?;
 
-    Ok(())
+    Ok(timeline)
 }
 
 pub(crate) fn get_timelines(
@@ -212,41 +321,12 @@ pub(crate) fn get_timelines(
             RepositoryTimeline::Remote { .. } => None,
         })
         .map(|(timeline_id, timeline)| {
-            let (ancestor_id, ancestor_lsn) = match timeline.get_ancestor_timeline_id() {
-                Some(ancestor_id) => (
-                    Some(ancestor_id.to_string()),
-                    Some(timeline.get_ancestor_lsn().to_string()),
-                ),
-                None => (None, None),
-            };
-
-            let current_logical_size_non_incremental = if include_non_incremental_logical_size {
-                match timeline
-                    .get_current_logical_size_non_incremental(timeline.get_last_record_lsn())
-                {
-                    Ok(size) => Some(size),
-                    Err(e) => {
-                        error!(
-                            "Failed to get current logical size for timeline {}: {:?}",
-                            timeline_id, e
-                        );
-                        None
-                    }
-                }
-            } else {
-                None
-            };
-
-            TimelineInfo {
+            TimelineInfo::from_dyn_timeline(
+                tenant_id,
                 timeline_id,
-                latest_valid_lsn: timeline.get_last_record_lsn(),
-                ancestor_id,
-                ancestor_lsn,
-                current_logical_size: timeline.get_current_logical_size(),
-                // non incremental size calculation can be heavy, so let it be optional
-                // needed for tests to check size calculation
-                current_logical_size_non_incremental,
-            }
+                timeline.as_ref(),
+                include_non_incremental_logical_size,
+            )
         })
         .collect())
 }
@@ -305,16 +385,22 @@ pub(crate) fn create_timeline(
                 );
             }
             repo.branch_timeline(ancestor_timeline_id, new_timeline_id, start_lsn)?;
+            // load the timeline into memory
+            let loaded_timeline = repo.get_timeline(new_timeline_id)?;
+            Ok(TimelineInfo::from_repo_timeline(
+                tenant_id,
+                loaded_timeline,
+                false,
+            ))
         }
-        None => bootstrap_timeline(conf, tenant_id, new_timeline_id, repo.as_ref())?,
+        None => {
+            let new_timeline = bootstrap_timeline(conf, tenant_id, new_timeline_id, repo.as_ref())?;
+            Ok(TimelineInfo::from_dyn_timeline(
+                tenant_id,
+                new_timeline_id,
+                new_timeline.as_ref(),
+                false,
+            ))
+        }
     }
-
-    Ok(TimelineInfo {
-        timeline_id: new_timeline_id,
-        latest_valid_lsn: start_lsn,
-        ancestor_id: ancestor_timeline_id.map(|id| id.to_string()),
-        ancestor_lsn: ancestor_start_lsn.map(|lsn| lsn.to_string()),
-        current_logical_size: 0,
-        current_logical_size_non_incremental: Some(0),
-    })
 }

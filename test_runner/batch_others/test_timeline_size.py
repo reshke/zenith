@@ -14,6 +14,7 @@ def test_timeline_size(zenith_simple_env: ZenithEnv):
 
     client = env.pageserver.http_client()
     res = client.timeline_detail(tenant_id=env.initial_tenant, timeline_id=new_timeline_id)
+    print(f'@@@@@@@@@@\n{res}\n@@@@@@@@@@@')
     assert res["current_logical_size"] == res["current_logical_size_non_incremental"]
 
     pgmain = env.postgres.create_start("test_timeline_size", timeline=new_timeline_id)
@@ -71,7 +72,7 @@ def test_timeline_size_quota(zenith_env_builder: ZenithEnvBuilder):
     new_timeline_id = env.zenith_cli.create_timeline()
 
     client = env.pageserver.http_client()
-    res = client.timeline_detach(tenant_id=env.initial_tenant, timeline_id=new_timeline_id)
+    res = client.timeline_detail(tenant_id=env.initial_tenant, timeline_id=new_timeline_id)
     assert res["current_logical_size"] == res["current_logical_size_non_incremental"]
 
     pgmain = env.postgres.create_start(

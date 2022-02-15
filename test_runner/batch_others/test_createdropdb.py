@@ -44,7 +44,7 @@ def test_createdb(zenith_simple_env: ZenithEnv):
 def test_dropdb(zenith_simple_env: ZenithEnv, test_output_dir):
     env = zenith_simple_env
     test_dropdb_timeline_id = env.zenith_cli.create_timeline()
-    pg = env.postgres.create_start('test_dropdb', tenant_id=test_dropdb_timeline_id)
+    pg = env.postgres.create_start('test_dropdb', timeline=test_dropdb_timeline_id)
     log.info("postgres is running on 'test_dropdb' branch")
 
     with closing(pg.connect()) as conn:
