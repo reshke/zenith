@@ -16,6 +16,7 @@ use walkeeper::defaults::{
     DEFAULT_HTTP_LISTEN_PORT as DEFAULT_SAFEKEEPER_HTTP_PORT,
     DEFAULT_PG_LISTEN_PORT as DEFAULT_SAFEKEEPER_PG_PORT,
 };
+
 use zenith_utils::auth::{Claims, Scope};
 use zenith_utils::postgres_backend::AuthType;
 use zenith_utils::zid::{ZNodeId, ZTenantId, ZTimelineId};
@@ -421,6 +422,16 @@ fn handle_init(init_match: &ArgMatches) -> Result<()> {
         exit(1);
     }
 
+    // If any safekeepers configured, grab generated timeline ID of the main
+    // branch from the pageserver and initialize timeline on safekeepers.
+    if !env.safekeepers.is_empty() {
+        start_all(&[], &env)?;
+        let main_timeline_id =
+            pageserver.branch_list(&env.default_tenantid.unwrap())?[0].timeline_id;
+        safekeepers_create_timeline(env.default_tenantid.unwrap(), main_timeline_id, &env)?;
+        stop_all(false, &env)?;
+    }
+
     Ok(())
 }
 
@@ -448,6 +459,9 @@ fn handle_tenant(tenant_match: &ArgMatches, env: &local_env::LocalEnv) -> Result
             println!("using tenant id {}", tenantid);
             pageserver.tenant_create(tenantid)?;
             println!("tenant successfully created on the pageserver");
+            // Create timeline of new tenant main branch on safekeepers.
+            let timeline_id = pageserver.branch_list(&tenantid)?[0].timeline_id;
+            safekeepers_create_timeline(env.default_tenantid.unwrap(), timeline_id, env)?;
         }
         Some((sub_name, _)) => bail!("Unexpected tenant subcommand '{}'", sub_name),
         None => bail!("no tenant subcommand provided"),
@@ -469,6 +483,7 @@ fn handle_branch(branch_match: &ArgMatches, env: &local_env::LocalEnv) -> Result
             "Created branch '{}' at {:?} for tenant: {}",
             branch.name, branch.latest_valid_lsn, tenantid,
         );
+        safekeepers_create_timeline(tenantid, branch.timeline_id, env)?;
     } else {
         // No arguments, list branches for tenant
         let branches = pageserver.branch_list(&tenantid)?;
@@ -687,12 +702,30 @@ fn handle_safekeeper(sub_match: &ArgMatches, env: &local_env::LocalEnv) -> Resul
     Ok(())
 }
 
+/// Create timeline on all safekeepers from env; they must be already running.
+fn safekeepers_create_timeline(
+    tenant_id: ZTenantId,
+    timeline_id: ZTimelineId,
+    env: &local_env::LocalEnv,
+) -> Result<()> {
+    let peer_ids: Vec<ZNodeId> = env.safekeepers.iter().map(|s| s.id).collect();
+    for node in env.safekeepers.iter() {
+        let safekeeper = SafekeeperNode::from_env(env, node);
+        safekeeper.timeline_create(tenant_id, timeline_id, peer_ids.clone())?;
+    }
+    Ok(())
+}
+
 fn handle_start_all(sub_match: &ArgMatches, env: &local_env::LocalEnv) -> Result<()> {
+    start_all(&pageserver_config_overrides(sub_match), env)
+}
+
+fn start_all(config_overrides: &[&str], env: &local_env::LocalEnv) -> Result<()> {
     let pageserver = PageServerNode::from_env(env);
 
     // Postgres nodes are not started automatically
 
-    if let Err(e) = pageserver.start(&pageserver_config_overrides(sub_match)) {
+    if let Err(e) = pageserver.start(config_overrides) {
         eprintln!("pageserver start failed: {}", e);
         exit(1);
     }
@@ -708,8 +741,10 @@ fn handle_start_all(sub_match: &ArgMatches, env: &local_env::LocalEnv) -> Result
 }
 
 fn handle_stop_all(sub_match: &ArgMatches, env: &local_env::LocalEnv) -> Result<()> {
-    let immediate = sub_match.value_of("stop-mode") == Some("immediate");
+    stop_all(sub_match.value_of("stop-mode") == Some("immediate"), env)
+}
 
+fn stop_all(immediate: bool, env: &local_env::LocalEnv) -> Result<()> {
     let pageserver = PageServerNode::from_env(env);
 
     // Stop all compute nodes

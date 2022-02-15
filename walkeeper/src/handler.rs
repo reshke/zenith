@@ -19,7 +19,6 @@ use zenith_utils::pq_proto::{BeMessage, FeStartupPacket, RowDescriptor, INT4_OID
 use zenith_utils::zid::{ZTenantId, ZTenantTimelineId, ZTimelineId};
 
 use crate::callmemaybe::CallmeEvent;
-use crate::timeline::CreateControlFile;
 use tokio::sync::mpsc::UnboundedSender;
 
 /// Safekeeper handler of postgres commands
@@ -109,18 +108,8 @@ impl postgres_backend::Handler for SafekeeperPostgresHandler {
                 let tenantid = self.ztenantid.context("tenantid is required")?;
                 let timelineid = self.ztimelineid.context("timelineid is required")?;
                 if self.timeline.is_none() {
-                    // START_WAL_PUSH is the only command that initializes the timeline in production.
-                    // There is also JSON_CTRL command, which should initialize the timeline for testing.
-                    let create_control_file = match cmd {
-                        SafekeeperPostgresCommand::StartWalPush { .. }
-                        | SafekeeperPostgresCommand::JSONCtrl { .. } => CreateControlFile::True,
-                        _ => CreateControlFile::False,
-                    };
-                    self.timeline.set(
-                        &self.conf,
-                        ZTenantTimelineId::new(tenantid, timelineid),
-                        create_control_file,
-                    )?;
+                    self.timeline
+                        .set(&self.conf, ZTenantTimelineId::new(tenantid, timelineid))?;
                 }
             }
         }

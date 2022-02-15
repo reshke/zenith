@@ -1,8 +1,10 @@
 use hyper::{Body, Request, Response, StatusCode};
+
 use serde::Serialize;
 use serde::Serializer;
 use std::fmt::Display;
 use std::sync::Arc;
+use zenith_utils::http::json::json_request;
 use zenith_utils::http::{RequestExt, RouterBuilder};
 use zenith_utils::lsn::Lsn;
 use zenith_utils::zid::ZNodeId;
@@ -10,7 +12,6 @@ use zenith_utils::zid::ZTenantTimelineId;
 
 use crate::safekeeper::Term;
 use crate::safekeeper::TermHistory;
-use crate::timeline::CreateControlFile;
 use crate::timeline::GlobalTimelines;
 use crate::SafeKeeperConf;
 use zenith_utils::http::endpoint;
@@ -18,6 +19,8 @@ use zenith_utils::http::error::ApiError;
 use zenith_utils::http::json::json_response;
 use zenith_utils::http::request::parse_request_param;
 use zenith_utils::zid::{ZTenantId, ZTimelineId};
+
+use super::models::TimelineCreateRequest;
 
 #[derive(Debug, Serialize)]
 struct SafekeeperStatus {
@@ -78,8 +81,7 @@ async fn timeline_status_handler(request: Request<Body>) -> Result<Response<Body
         parse_request_param(&request, "timeline_id")?,
     );
 
-    let tli = GlobalTimelines::get(get_conf(&request), zttid, CreateControlFile::False)
-        .map_err(ApiError::from_err)?;
+    let tli = GlobalTimelines::get(get_conf(&request), zttid).map_err(ApiError::from_err)?;
     let sk_state = tli.get_info();
     let flush_lsn = tli.get_end_of_wal();
 
@@ -100,6 +102,19 @@ async fn timeline_status_handler(request: Request<Body>) -> Result<Response<Body
     Ok(json_response(StatusCode::OK, status)?)
 }
 
+async fn timeline_create_handler(mut request: Request<Body>) -> Result<Response<Body>, ApiError> {
+    let request_data: TimelineCreateRequest = json_request(&mut request).await?;
+
+    let zttid = ZTenantTimelineId {
+        tenant_id: request_data.tenant_id,
+        timeline_id: request_data.timeline_id,
+    };
+    GlobalTimelines::create(get_conf(&request), zttid, request_data.peer_ids)
+        .map_err(ApiError::from_err)?;
+
+    Ok(json_response(StatusCode::CREATED, ())?)
+}
+
 /// Safekeeper http router.
 pub fn make_router(conf: SafeKeeperConf) -> RouterBuilder<hyper::Body, ApiError> {
     let router = endpoint::make_router();
@@ -110,4 +125,5 @@ pub fn make_router(conf: SafeKeeperConf) -> RouterBuilder<hyper::Body, ApiError>
             "/v1/timeline/:tenant_id/:timeline_id",
             timeline_status_handler,
         )
+        .post("/v1/timeline", timeline_create_handler)
 }

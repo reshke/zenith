@@ -17,7 +17,7 @@ use tracing::*;
 use zenith_metrics::{register_histogram_vec, Histogram, HistogramVec, DISK_WRITE_SECONDS_BUCKETS};
 use zenith_utils::bin_ser::LeSer;
 use zenith_utils::lsn::Lsn;
-use zenith_utils::zid::ZTenantTimelineId;
+use zenith_utils::zid::{ZNodeId, ZTenantTimelineId};
 
 use crate::callmemaybe::{CallmeEvent, SubscriptionStateKey};
 use crate::safekeeper::{
@@ -93,13 +93,6 @@ struct SharedState {
     pageserver_connstr: Option<String>,
 }
 
-// A named boolean.
-#[derive(Debug)]
-pub enum CreateControlFile {
-    True,
-    False,
-}
-
 lazy_static! {
     static ref PERSIST_CONTROL_FILE_SECONDS: HistogramVec = register_histogram_vec!(
         "safekeeper_persist_control_file_seconds",
@@ -111,14 +104,31 @@ lazy_static! {
 }
 
 impl SharedState {
-    /// Restore SharedState from control file.
-    /// If create=false and file doesn't exist, bails out.
-    fn create_restore(
+    /// Initialize timeline state, creating control file
+    fn create(
         conf: &SafeKeeperConf,
         zttid: &ZTenantTimelineId,
-        create: CreateControlFile,
+        peer_ids: Vec<ZNodeId>,
     ) -> Result<Self> {
-        let state = FileStorage::load_control_file_conf(conf, zttid, create)
+        let state = SafeKeeperState::new(zttid, peer_ids);
+        let file_storage = FileStorage::new(zttid, conf);
+        let mut sk = SafeKeeper::new(zttid.timeline_id, Lsn(0), file_storage, state);
+        sk.storage.persist(&sk.s)?;
+
+        Ok(Self {
+            notified_commit_lsn: Lsn(0),
+            sk,
+            replicas: Vec::new(),
+            active: false,
+            num_computes: 0,
+            pageserver_connstr: None,
+        })
+    }
+
+    /// Restore SharedState from control file.
+    /// If file doesn't exist, bails out.
+    fn restore(conf: &SafeKeeperConf, zttid: &ZTenantTimelineId) -> Result<Self> {
+        let state = FileStorage::load_control_file_conf(conf, zttid)
             .context("failed to load from control file")?;
         let file_storage = FileStorage::new(zttid, conf);
         let flush_lsn = if state.server.wal_seg_size != 0 {
@@ -456,27 +466,14 @@ impl Timeline {
 
 // Utilities needed by various Connection-like objects
 pub trait TimelineTools {
-    fn set(
-        &mut self,
-        conf: &SafeKeeperConf,
-        zttid: ZTenantTimelineId,
-        create: CreateControlFile,
-    ) -> Result<()>;
+    fn set(&mut self, conf: &SafeKeeperConf, zttid: ZTenantTimelineId) -> Result<()>;
 
     fn get(&self) -> &Arc<Timeline>;
 }
 
 impl TimelineTools for Option<Arc<Timeline>> {
-    fn set(
-        &mut self,
-        conf: &SafeKeeperConf,
-        zttid: ZTenantTimelineId,
-        create: CreateControlFile,
-    ) -> Result<()> {
-        // We will only set the timeline once. If it were to ever change,
-        // anyone who cloned the Arc would be out of date.
-        assert!(self.is_none());
-        *self = Some(GlobalTimelines::get(conf, zttid, create)?);
+    fn set(&mut self, conf: &SafeKeeperConf, zttid: ZTenantTimelineId) -> Result<()> {
+        *self = Some(GlobalTimelines::get(conf, zttid)?);
         Ok(())
     }
 
@@ -494,30 +491,38 @@ lazy_static! {
 pub struct GlobalTimelines;
 
 impl GlobalTimelines {
-    /// Get a timeline with control file loaded from the global TIMELINES map.
-    /// If control file doesn't exist and create=false, bails out.
-    pub fn get(
+    pub fn create(
         conf: &SafeKeeperConf,
         zttid: ZTenantTimelineId,
-        create: CreateControlFile,
+        peer_ids: Vec<ZNodeId>,
     ) -> Result<Arc<Timeline>> {
+        let mut timelines = TIMELINES.lock().unwrap();
+        match timelines.get(&zttid) {
+            Some(_) => bail!("timeline {} already exists", zttid),
+            None => {
+                // TODO: check directory existence
+                let dir = conf.timeline_dir(&zttid);
+                fs::create_dir_all(dir)?;
+                let shared_state = SharedState::create(conf, &zttid, peer_ids)
+                    .context("failed to create shared state")?;
+
+                let new_tli = Arc::new(Timeline::new(zttid, shared_state));
+                timelines.insert(zttid, Arc::clone(&new_tli));
+                Ok(new_tli)
+            }
+        }
+    }
+
+    /// Get a timeline with control file loaded from the global TIMELINES map.
+    /// If control file doesn't exist, bails out.
+    pub fn get(conf: &SafeKeeperConf, zttid: ZTenantTimelineId) -> Result<Arc<Timeline>> {
         let mut timelines = TIMELINES.lock().unwrap();
 
         match timelines.get(&zttid) {
             Some(result) => Ok(Arc::clone(result)),
             None => {
-                if let CreateControlFile::True = create {
-                    let dir = conf.timeline_dir(&zttid);
-                    info!(
-                        "creating timeline dir {}, create is {:?}",
-                        dir.display(),
-                        create
-                    );
-                    fs::create_dir_all(dir)?;
-                }
-
-                let shared_state = SharedState::create_restore(conf, &zttid, create)
-                    .context("failed to restore shared state")?;
+                let shared_state =
+                    SharedState::restore(conf, &zttid).context("failed to restore shared state")?;
 
                 let new_tli = Arc::new(Timeline::new(zttid, shared_state));
                 timelines.insert(zttid, Arc::clone(&new_tli));
@@ -571,28 +576,23 @@ impl FileStorage {
     fn load_control_file_conf(
         conf: &SafeKeeperConf,
         zttid: &ZTenantTimelineId,
-        create: CreateControlFile,
     ) -> Result<SafeKeeperState> {
         let path = conf.timeline_dir(zttid).join(CONTROL_FILE_NAME);
-        Self::load_control_file(path, create)
+        Self::load_control_file(path)
     }
 
     /// Read in the control file.
-    /// If create=false and file doesn't exist, bails out.
-    pub fn load_control_file<P: AsRef<Path>>(
-        control_file_path: P,
-        create: CreateControlFile,
-    ) -> Result<SafeKeeperState> {
+    /// If file doesn't exist, bails out.
+    pub fn load_control_file<P: AsRef<Path>>(control_file_path: P) -> Result<SafeKeeperState> {
         info!(
-            "loading control file {}, create={:?}",
+            "loading control file {}",
             control_file_path.as_ref().display(),
-            create,
         );
 
         let mut control_file = OpenOptions::new()
             .read(true)
             .write(true)
-            .create(matches!(create, CreateControlFile::True))
+            .create(false)
             .open(&control_file_path)
             .with_context(|| {
                 format!(
@@ -602,40 +602,32 @@ impl FileStorage {
             })?;
 
         // Empty file is legit on 'create', don't try to deser from it.
-        let state = if control_file.metadata().unwrap().len() == 0 {
-            if let CreateControlFile::False = create {
-                bail!("control file is empty");
-            }
-            SafeKeeperState::new()
-        } else {
-            let mut buf = Vec::new();
-            control_file
-                .read_to_end(&mut buf)
-                .context("failed to read control file")?;
+        let mut buf = Vec::new();
+        control_file
+            .read_to_end(&mut buf)
+            .context("failed to read control file")?;
 
-            let calculated_checksum = crc32c::crc32c(&buf[..buf.len() - CHECKSUM_SIZE]);
+        let calculated_checksum = crc32c::crc32c(&buf[..buf.len() - CHECKSUM_SIZE]);
 
-            let expected_checksum_bytes: &[u8; CHECKSUM_SIZE] =
-                buf[buf.len() - CHECKSUM_SIZE..].try_into()?;
-            let expected_checksum = u32::from_le_bytes(*expected_checksum_bytes);
+        let expected_checksum_bytes: &[u8; CHECKSUM_SIZE] =
+            buf[buf.len() - CHECKSUM_SIZE..].try_into()?;
+        let expected_checksum = u32::from_le_bytes(*expected_checksum_bytes);
 
-            ensure!(
-                calculated_checksum == expected_checksum,
+        ensure!(
+            calculated_checksum == expected_checksum,
+            format!(
+                "safekeeper control file checksum mismatch: expected {} got {}",
+                expected_checksum, calculated_checksum
+            )
+        );
+
+        let state = FileStorage::deser_sk_state(&mut &buf[..buf.len() - CHECKSUM_SIZE])
+            .with_context(|| {
                 format!(
-                    "safekeeper control file checksum mismatch: expected {} got {}",
-                    expected_checksum, calculated_checksum
+                    "while reading control file {}",
+                    control_file_path.as_ref().display(),
                 )
-            );
-
-            FileStorage::deser_sk_state(&mut &buf[..buf.len() - CHECKSUM_SIZE]).with_context(
-                || {
-                    format!(
-                        "while reading control file {}",
-                        control_file_path.as_ref().display(),
-                    )
-                },
-            )?
-        };
+            })?;
         Ok(state)
     }
 
@@ -850,7 +842,7 @@ mod test {
     use super::FileStorage;
     use crate::{
         safekeeper::{SafeKeeperState, Storage},
-        timeline::{CreateControlFile, CONTROL_FILE_NAME},
+        timeline::CONTROL_FILE_NAME,
         SafeKeeperConf, ZTenantTimelineId,
     };
     use anyhow::Result;
@@ -865,15 +857,24 @@ mod test {
         }
     }
 
+    fn create(
+        conf: &SafeKeeperConf,
+        zttid: &ZTenantTimelineId,
+    ) -> Result<(FileStorage, SafeKeeperState)> {
+        fs::create_dir_all(&conf.timeline_dir(zttid)).expect("failed to create timeline dir");
+        let state = SafeKeeperState::empty();
+        let mut storage = FileStorage::new(zttid, conf);
+        storage.persist(&state)?;
+        Ok((storage, state))
+    }
+
     fn load_from_control_file(
         conf: &SafeKeeperConf,
         zttid: &ZTenantTimelineId,
-        create: CreateControlFile,
     ) -> Result<(FileStorage, SafeKeeperState)> {
-        fs::create_dir_all(&conf.timeline_dir(zttid)).expect("failed to create timeline dir");
         Ok((
             FileStorage::new(zttid, conf),
-            FileStorage::load_control_file_conf(conf, zttid, create)?,
+            FileStorage::load_control_file_conf(conf, zttid)?,
         ))
     }
 
@@ -882,16 +883,13 @@ mod test {
         let conf = stub_conf();
         let zttid = ZTenantTimelineId::generate();
         {
-            let (mut storage, mut state) =
-                load_from_control_file(&conf, &zttid, CreateControlFile::True)
-                    .expect("failed to read state");
+            let (mut storage, mut state) = create(&conf, &zttid).expect("failed to create state");
             // change something
             state.wal_start_lsn = Lsn(42);
             storage.persist(&state).expect("failed to persist state");
         }
 
-        let (_, state) = load_from_control_file(&conf, &zttid, CreateControlFile::False)
-            .expect("failed to read state");
+        let (_, state) = load_from_control_file(&conf, &zttid).expect("failed to read state");
         assert_eq!(state.wal_start_lsn, Lsn(42));
     }
 
@@ -900,9 +898,7 @@ mod test {
         let conf = stub_conf();
         let zttid = ZTenantTimelineId::generate();
         {
-            let (mut storage, mut state) =
-                load_from_control_file(&conf, &zttid, CreateControlFile::True)
-                    .expect("failed to read state");
+            let (mut storage, mut state) = create(&conf, &zttid).expect("failed to read state");
             // change something
             state.wal_start_lsn = Lsn(42);
             storage.persist(&state).expect("failed to persist state");
@@ -912,7 +908,7 @@ mod test {
         data[0] += 1; // change the first byte of the file to fail checksum validation
         fs::write(&control_path, &data).expect("failed to write control file");
 
-        match load_from_control_file(&conf, &zttid, CreateControlFile::False) {
+        match load_from_control_file(&conf, &zttid) {
             Err(err) => assert!(err
                 .to_string()
                 .contains("safekeeper control file checksum mismatch")),
