@@ -17,8 +17,8 @@ def test_pageserver_restart(zenith_env_builder: ZenithEnvBuilder):
     zenith_env_builder.num_safekeepers = 1
     env = zenith_env_builder.init()
 
-    env.zenith_cli.create_branch("test_pageserver_restart", "main")
-    pg = env.postgres.create_start('test_pageserver_restart')
+    new_timeline_id = env.zenith_cli.create_timeline()
+    pg = env.postgres.create_start('test_pageserver_restart', timeline=new_timeline_id)
 
     pg_conn = pg.connect()
     cur = pg_conn.cursor()

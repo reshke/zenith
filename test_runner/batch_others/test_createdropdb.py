@@ -13,9 +13,9 @@ pytest_plugins = ("fixtures.zenith_fixtures")
 #
 def test_createdb(zenith_simple_env: ZenithEnv):
     env = zenith_simple_env
-    env.zenith_cli.create_branch("test_createdb", "empty")
+    test_createdb_timeline_id = env.zenith_cli.create_timeline()
 
-    pg = env.postgres.create_start('test_createdb')
+    pg = env.postgres.create_start('test_createdb', timeline=test_createdb_timeline_id)
     log.info("postgres is running on 'test_createdb' branch")
 
     with closing(pg.connect()) as conn:
@@ -29,9 +29,9 @@ def test_createdb(zenith_simple_env: ZenithEnv):
             lsn = cur.fetchone()[0]
 
     # Create a branch
-    env.zenith_cli.create_branch("test_createdb2", "test_createdb@" + lsn)
-
-    pg2 = env.postgres.create_start('test_createdb2')
+    test_createdb2_timeline_id = env.zenith_cli.create_timeline(
+        ancestor_timeline_id=test_createdb_timeline_id, ancestor_start_lsn=lsn)
+    pg2 = env.postgres.create_start('test_createdb2', timeline=test_createdb2_timeline_id)
 
     # Test that you can connect to the new database on both branches
     for db in (pg, pg2):
@@ -43,9 +43,8 @@ def test_createdb(zenith_simple_env: ZenithEnv):
 #
 def test_dropdb(zenith_simple_env: ZenithEnv, test_output_dir):
     env = zenith_simple_env
-    env.zenith_cli.create_branch("test_dropdb", "empty")
-
-    pg = env.postgres.create_start('test_dropdb')
+    test_dropdb_timeline_id = env.zenith_cli.create_timeline()
+    pg = env.postgres.create_start('test_dropdb', tenant_id=test_dropdb_timeline_id)
     log.info("postgres is running on 'test_dropdb' branch")
 
     with closing(pg.connect()) as conn:
@@ -68,11 +67,15 @@ def test_dropdb(zenith_simple_env: ZenithEnv, test_output_dir):
             lsn_after_drop = cur.fetchone()[0]
 
     # Create two branches before and after database drop.
-    env.zenith_cli.create_branch("test_before_dropdb", "test_dropdb@" + lsn_before_drop)
-    pg_before = env.postgres.create_start('test_before_dropdb')
+    test_before_dropdb_timeline_db = env.zenith_cli.create_timeline(
+        ancestor_timeline_id=test_dropdb_timeline_id, ancestor_start_lsn=lsn_before_drop)
+    pg_before = env.postgres.create_start('test_before_dropdb',
+                                          timeline=test_before_dropdb_timeline_db)
 
-    env.zenith_cli.create_branch("test_after_dropdb", "test_dropdb@" + lsn_after_drop)
-    pg_after = env.postgres.create_start('test_after_dropdb')
+    test_after_dropdb_timeline_id = env.zenith_cli.create_timeline(
+        ancestor_timeline_id=test_dropdb_timeline_id, ancestor_start_lsn=lsn_after_drop)
+    pg_after = env.postgres.create_start('test_after_dropdb',
+                                         timeline=test_after_dropdb_timeline_id)
 
     # Test that database exists on the branch before drop
     pg_before.connect(dbname='foodb').close()

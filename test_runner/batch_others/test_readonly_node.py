@@ -13,9 +13,9 @@ pytest_plugins = ("fixtures.zenith_fixtures")
 #
 def test_readonly_node(zenith_simple_env: ZenithEnv):
     env = zenith_simple_env
-    env.zenith_cli.create_branch("test_readonly_node", "empty")
-
-    pgmain = env.postgres.create_start('test_readonly_node')
+    test_readonly_node_timeline_id = env.zenith_cli.create_timeline()
+    pgmain = env.postgres.create_start('test_readonly_node',
+                                       timeline=test_readonly_node_timeline_id)
     log.info("postgres is running on 'test_readonly_node' branch")
 
     main_pg_conn = pgmain.connect()
@@ -56,11 +56,13 @@ def test_readonly_node(zenith_simple_env: ZenithEnv):
 
     # Create first read-only node at the point where only 100 rows were inserted
     pg_hundred = env.postgres.create_start("test_readonly_node_hundred",
-                                           timeline=f'test_readonly_node@{lsn_a}')
+                                           timeline=test_readonly_node_timeline_id,
+                                           lsn=lsn_a)
 
     # And another at the point where 200100 rows were inserted
     pg_more = env.postgres.create_start("test_readonly_node_more",
-                                        timeline=f'test_readonly_node@{lsn_b}')
+                                        timeline=test_readonly_node_timeline_id,
+                                        lsn=lsn_b)
 
     # On the 'hundred' node, we should see only 100 rows
     hundred_pg_conn = pg_hundred.connect()
@@ -80,7 +82,8 @@ def test_readonly_node(zenith_simple_env: ZenithEnv):
 
     # Check creating a node at segment boundary
     pg = env.postgres.create_start("test_branch_segment_boundary",
-                                   timeline="test_readonly_node@0/3000000")
+                                   timeline=test_readonly_node_timeline_id,
+                                   lsn='0/3000000')
     cur = pg.connect().cursor()
     cur.execute('SELECT 1')
     assert cur.fetchone() == (1, )
@@ -89,4 +92,5 @@ def test_readonly_node(zenith_simple_env: ZenithEnv):
     with pytest.raises(Exception, match="invalid basebackup lsn"):
         # compute node startup with invalid LSN should fail
         env.zenith_cli.pg_start("test_readonly_node_preinitdb",
-                                timeline_spec="test_readonly_node@0/42")
+                                timeline_id=test_readonly_node_timeline_id,
+                                lsn="0/42")

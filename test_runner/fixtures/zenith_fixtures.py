@@ -675,8 +675,8 @@ class ZenithPageserverHttpClient(requests.Session):
     def timeline_create(self,
                         tenant_id: uuid.UUID,
                         timeline_id: uuid.UUID,
-                        start_lsn: Optional[int],
-                        ancestor_timeline_id: Optional[uuid.UUID]) -> Dict[Any, Any]:
+                        start_lsn: Optional[str] = None,
+                        ancestor_timeline_id: Optional[uuid.UUID] = None) -> Dict[Any, Any]:
         res = self.post(f"http://localhost:{self.port}/v1/timeline",
                         json={
                             'tenant_id': tenant_id.hex,
@@ -766,13 +766,15 @@ class ZenithCli:
         return tenant_id
 
     def list_tenants(self) -> 'subprocess.CompletedProcess[str]':
-        return self.raw_cli(['tenant', 'list'])
+        res = self.raw_cli(['tenant', 'list'])
+        res.check_returncode()
+        return res
 
     def create_timeline(self,
                         tenant_id: Optional[uuid.UUID] = None,
                         timeline_id: Optional[uuid.UUID] = None,
                         ancestor_timeline_id: Optional[uuid.UUID] = None,
-                        ancestor_start_lsn: Optional[int] = None) -> uuid.UUID:
+                        ancestor_start_lsn: Optional[str] = None) -> uuid.UUID:
         cmd = [
             'timeline',
             'create',
@@ -801,8 +803,11 @@ class ZenithCli:
         else:
             return uuid.UUID(new_timeline_id)
 
-    def list_timelines(self) -> None:
-        pass
+    def list_timelines(self,
+                       tenant_id: Optional[uuid.UUID] = None) -> 'subprocess.CompletedProcess[str]':
+        res = self.raw_cli(
+            ['timeline', 'list', '--tenantid', (tenant_id or self.env.initial_tenant).hex])
+        return res
 
     def init(self, config_toml: str) -> 'subprocess.CompletedProcess[str]':
         with tempfile.NamedTemporaryFile(mode='w+') as tmp:
@@ -840,37 +845,43 @@ class ZenithCli:
     def pg_create(
         self,
         node_name: str,
+        timeline: Optional[uuid.UUID] = None,
         tenant_id: Optional[uuid.UUID] = None,
-        timeline_spec: Optional[str] = None,
+        lsn: Optional[str] = None,
         port: Optional[int] = None,
     ) -> 'subprocess.CompletedProcess[str]':
-        args = ['pg', 'create']
-        if tenant_id is not None:
-            args.extend(['--tenantid', tenant_id.hex])
+        args = ['pg', 'create', f'--tenantid={(tenant_id or self.env.initial_tenant).hex}']
+        if lsn is not None:
+            args.append(f'--lsn={lsn}')
         if port is not None:
             args.append(f'--port={port}')
-        args.append(node_name)
-        if timeline_spec is not None:
-            args.append(timeline_spec)
-        return self.raw_cli(args)
+        args.extend([node_name, (timeline or self.env.initial_timeline).hex])
+        res = self.raw_cli(args)
+        res.check_returncode()
+        return res
 
     def pg_start(
         self,
         node_name: str,
         tenant_id: Optional[uuid.UUID] = None,
-        timeline_spec: Optional[str] = None,
+        timeline_id: Optional[uuid.UUID] = None,
+        lsn: Optional[str] = None,
         port: Optional[int] = None,
     ) -> 'subprocess.CompletedProcess[str]':
-        args = ['pg', 'start']
-        if tenant_id is not None:
-            args.extend(['--tenantid', tenant_id.hex])
+        args = [
+            'pg',
+            'start',
+            f'--tenantid={(tenant_id or self.env.initial_tenant).hex}',
+        ]
+        if lsn is not None:
+            args.append(f'--port={lsn}')
         if port is not None:
             args.append(f'--port={port}')
-        args.append(node_name)
-        if timeline_spec is not None:
-            args.append(timeline_spec)
+        args.extend([node_name, (timeline_id or self.env.initial_timeline).hex])
 
-        return self.raw_cli(args)
+        res = self.raw_cli(args)
+        res.check_returncode()
+        return res
 
     def pg_stop(
         self,
@@ -878,9 +889,7 @@ class ZenithCli:
         tenant_id: Optional[uuid.UUID] = None,
         destroy=False,
     ) -> 'subprocess.CompletedProcess[str]':
-        args = ['pg', 'stop']
-        if tenant_id is not None:
-            args.extend(['--tenantid', tenant_id.hex])
+        args = ['pg', 'stop', node_name, f'--tenantid={(tenant_id or self.env.initial_tenant).hex}']
         if destroy:
             args.append('--destroy')
         args.append(node_name)
@@ -1148,6 +1157,7 @@ class Postgres(PgProtocol):
         self,
         node_name: str,
         timeline: uuid.UUID,
+        lsn: Optional[str] = None,
         config_lines: Optional[List[str]] = None,
     ) -> 'Postgres':
         """
@@ -1158,7 +1168,11 @@ class Postgres(PgProtocol):
         if not config_lines:
             config_lines = []
 
-        self.env.zenith_cli.pg_create(node_name, timeline, self.tenant_id, self.port)
+        self.env.zenith_cli.pg_create(node_name,
+                                      timeline=timeline,
+                                      tenant_id=self.tenant_id,
+                                      lsn=lsn,
+                                      port=self.port)
         self.node_name = node_name
         path = pathlib.Path('pgdatadirs') / 'tenants' / self.tenant_id.hex / self.node_name
         self.pgdata_dir = os.path.join(self.env.repo_dir, path)
@@ -1179,7 +1193,9 @@ class Postgres(PgProtocol):
 
         log.info(f"Starting postgres node {self.node_name}")
 
-        run_result = self.env.zenith_cli.pg_start(self.node_name, self.tenant_id, self.port)
+        run_result = self.env.zenith_cli.pg_start(self.node_name,
+                                                  tenant_id=self.tenant_id,
+                                                  port=self.port)
         self.running = True
 
         log.info(f"stdout: {run_result.stdout}")
@@ -1270,6 +1286,7 @@ class Postgres(PgProtocol):
         self,
         node_name: str,
         timeline: uuid.UUID,
+        lsn: Optional[str] = None,
         config_lines: Optional[List[str]] = None,
     ) -> 'Postgres':
         """
@@ -1282,6 +1299,7 @@ class Postgres(PgProtocol):
             node_name=node_name,
             timeline=timeline,
             config_lines=config_lines,
+            lsn=lsn,
         ).start()
 
         return self
@@ -1304,6 +1322,7 @@ class PostgresFactory:
                      node_name: str = "main",
                      tenant_id: Optional[uuid.UUID] = None,
                      timeline: Optional[uuid.UUID] = None,
+                     lsn: Optional[str] = None,
                      config_lines: Optional[List[str]] = None) -> Postgres:
 
         pg = Postgres(
@@ -1318,12 +1337,14 @@ class PostgresFactory:
             node_name=node_name,
             timeline=timeline or self.env.initial_timeline,
             config_lines=config_lines,
+            lsn=lsn,
         )
 
     def create(self,
                node_name: str = "main",
                tenant_id: Optional[uuid.UUID] = None,
                timeline: Optional[uuid.UUID] = None,
+               lsn: Optional[str] = None,
                config_lines: Optional[List[str]] = None) -> Postgres:
 
         pg = Postgres(
@@ -1338,6 +1359,7 @@ class PostgresFactory:
         return pg.create(
             node_name=node_name,
             timeline=timeline or self.env.initial_timeline,
+            lsn=lsn,
             config_lines=config_lines,
         )
 

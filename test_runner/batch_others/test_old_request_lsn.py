@@ -18,8 +18,8 @@ pytest_plugins = ("fixtures.zenith_fixtures")
 #
 def test_old_request_lsn(zenith_simple_env: ZenithEnv):
     env = zenith_simple_env
-    env.zenith_cli.create_branch("test_old_request_lsn", "empty")
-    pg = env.postgres.create_start('test_old_request_lsn')
+    new_timeline_id = env.zenith_cli.create_timeline()
+    pg = env.postgres.create_start('test_old_request_lsn', timeline=new_timeline_id)
     log.info('postgres is running on test_old_request_lsn branch')
 
     pg_conn = pg.connect()

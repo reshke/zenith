@@ -12,7 +12,6 @@ pytest_plugins = ("fixtures.zenith_fixtures")
 # CLOG.
 def test_subxacts(zenith_simple_env: ZenithEnv, test_output_dir):
     env = zenith_simple_env
-    # TODO kb find all such places and consider how they should be fixed for timelines
     new_timeline_id = env.zenith_cli.create_timeline()
     pg = env.postgres.create_start('test_subxacts', timeline=new_timeline_id)
 

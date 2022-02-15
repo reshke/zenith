@@ -11,9 +11,8 @@ pytest_plugins = ("fixtures.zenith_fixtures")
 #
 def test_createuser(zenith_simple_env: ZenithEnv):
     env = zenith_simple_env
-    env.zenith_cli.create_branch("test_createuser", "empty")
-
-    pg = env.postgres.create_start('test_createuser')
+    test_createuser_timeline_id = env.zenith_cli.create_timeline()
+    pg = env.postgres.create_start('test_createuser', timeline=test_createuser_timeline_id)
     log.info("postgres is running on 'test_createuser' branch")
 
     with closing(pg.connect()) as conn:
@@ -27,9 +26,9 @@ def test_createuser(zenith_simple_env: ZenithEnv):
             lsn = cur.fetchone()[0]
 
     # Create a branch
-    env.zenith_cli.create_branch("test_createuser2", "test_createuser@" + lsn)
-
-    pg2 = env.postgres.create_start('test_createuser2')
+    test_createuser2_timeline_id = env.zenith_cli.create_timeline(
+        ancestor_timeline_id=test_createuser_timeline_id, ancestor_start_lsn=lsn)
+    pg2 = env.postgres.create_start('test_createuser2', timeline=test_createuser2_timeline_id)
 
     # Test that you can connect to new branch as a new user
     assert pg2.safe_psql('select current_user', username='testuser') == [('testuser', )]

@@ -16,8 +16,8 @@ pytest_plugins = ("fixtures.zenith_fixtures")
 #
 def test_layerfiles_gc(zenith_simple_env: ZenithEnv):
     env = zenith_simple_env
-    env.zenith_cli.create_branch("test_layerfiles_gc", "empty")
-    pg = env.postgres.create_start('test_layerfiles_gc')
+    new_timeline_id = env.zenith_cli.create_timeline()
+    pg = env.postgres.create_start('test_layerfiles_gc', timeline=new_timeline_id)
 
     with closing(pg.connect()) as conn:
         with conn.cursor() as cur:

@@ -130,13 +130,11 @@ def test_tenant_relocation(zenith_env_builder: ZenithEnvBuilder,
     tenant = env.zenith_cli.create_tenant(UUID("74ee8b079a0e437eb0afea7d26a07209"))
     log.info("tenant to relocate %s", tenant)
 
-    env.zenith_cli.create_branch("test_tenant_relocation", "main", tenant_id=tenant)
+    new_timeline_id = env.zenith_cli.create_timeline(tenant_id=tenant)
 
-    tenant_pg = env.postgres.create_start(
-        "test_tenant_relocation",
-        "main",  # branch name, None means same as node name
-        tenant_id=tenant,
-    )
+    tenant_pg = env.postgres.create_start("test_tenant_relocation",
+                                          tenant_id=tenant,
+                                          timeline=new_timeline_id)
 
     # insert some data
     with closing(tenant_pg.connect()) as conn:
@@ -201,7 +199,7 @@ def test_tenant_relocation(zenith_env_builder: ZenithEnvBuilder,
         new_timeline_detail = wait_for(
             number_of_iterations=5,
             interval=1,
-            func=lambda: assert_local(new_pageserver_http_client, tenant, timeline))
+            func=lambda: assert_local(new_pageserver_http_client, tenant.hex, timeline.hex))
         assert new_timeline_detail['timeline_state'].get('Ready'), new_timeline_detail
         # when load is active these checks can break because lsns are not static
         # so lets check with some margin

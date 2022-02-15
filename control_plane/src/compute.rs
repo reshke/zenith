@@ -78,6 +78,7 @@ impl ComputeControlPlane {
         tenantid: ZTenantId,
         name: &str,
         timeline_id: ZTimelineId,
+        lsn: Option<Lsn>,
         port: Option<u16>,
     ) -> Result<Arc<PostgresNode>> {
         let port = port.unwrap_or_else(|| self.get_port());
@@ -88,7 +89,7 @@ impl ComputeControlPlane {
             pageserver: Arc::clone(&self.pageserver),
             is_test: false,
             timeline_id,
-            lsn: None,
+            lsn,
             tenantid,
             uses_wal_proposer: false,
         });

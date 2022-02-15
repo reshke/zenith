@@ -68,10 +68,8 @@ struct TimelineTreeEl {
 //   * Providing CLI api to the pageserver
 //   * TODO: export/import to/from usual postgres
 fn main() -> Result<()> {
-    #[rustfmt::skip] // rustfmt squashes these into a single line otherwise
     let pg_node_arg = Arg::new("node").index(1).help("Node name").required(true);
 
-    #[rustfmt::skip]
     let safekeeper_node_arg = Arg::new("node").index(1).help("Node name").required(false);
 
     let timeline_id_arg = Arg::new("timeline")
@@ -103,6 +101,12 @@ fn main() -> Result<()> {
         .number_of_values(1)
         .multiple_occurrences(true)
         .help("Additional pageserver's configuration options or overrides, refer to pageserver's 'config-override' CLI parameter docs for more")
+        .required(false);
+
+    let lsn_arg = Arg::new("lsn")
+        .long("lsn")
+        .help("Specify Lsn on the timeline to start from. By default, end of the timeline would be used.")
+        .takes_value(true)
         .required(false);
 
     let matches = App::new("Zenith CLI")
@@ -177,6 +181,7 @@ fn main() -> Result<()> {
                     .arg(pg_node_arg.clone().index(1))
                     .arg(timeline_id_arg.clone().index(2))
                     .arg(tenantid_arg.clone())
+                    .arg(lsn_arg.clone())
                     .arg(port_arg.clone())
                     .arg(
                         Arg::new("config-only")
@@ -189,6 +194,7 @@ fn main() -> Result<()> {
                     .arg(pg_node_arg.clone().index(1))
                     .arg(timeline_id_arg.clone().index(2))
                     .arg(tenantid_arg.clone())
+                    .arg(lsn_arg.clone())
                     .arg(port_arg.clone()))
                 .subcommand(
                     App::new("stop")
@@ -558,13 +564,18 @@ fn handle_pg(pg_match: &ArgMatches, env: &local_env::LocalEnv) -> Result<()> {
         }
         "create" => {
             let node_name = sub_args.value_of("node").unwrap_or("main");
+            let lsn = sub_args
+                .value_of("lsn")
+                .map(Lsn::from_str)
+                .transpose()
+                .context("Failed to parse Lsn from the request")?;
             let timeline_id = get_timeline_id(sub_args, tenant_id, env)?;
 
             let port: Option<u16> = match sub_args.value_of("port") {
                 Some(p) => Some(p.parse()?),
                 None => None,
             };
-            cplane.new_node(tenant_id, node_name, timeline_id, port)?;
+            cplane.new_node(tenant_id, node_name, timeline_id, lsn, port)?;
         }
         "start" => {
             let node_name = sub_args.value_of("node").unwrap_or("main");
@@ -589,6 +600,11 @@ fn handle_pg(pg_match: &ArgMatches, env: &local_env::LocalEnv) -> Result<()> {
                 node.start(&auth_token)?;
             } else {
                 let timeline_id = get_timeline_id(sub_args, tenant_id, env)?;
+                let lsn = sub_args
+                    .value_of("lsn")
+                    .map(Lsn::from_str)
+                    .transpose()
+                    .context("Failed to parse Lsn from the request")?;
                 // when used with custom port this results in non obvious behaviour
                 // port is remembered from first start command, i e
                 // start --port X
@@ -598,7 +614,7 @@ fn handle_pg(pg_match: &ArgMatches, env: &local_env::LocalEnv) -> Result<()> {
                     "Starting new postgres {} on timeline {} ...",
                     node_name, timeline_id
                 );
-                let node = cplane.new_node(tenant_id, node_name, timeline_id, port)?;
+                let node = cplane.new_node(tenant_id, node_name, timeline_id, lsn, port)?;
                 node.start(&auth_token)?;
             }
         }

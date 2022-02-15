@@ -12,8 +12,8 @@ pytest_plugins = ("fixtures.zenith_fixtures")
 #
 def test_multixact(zenith_simple_env: ZenithEnv, test_output_dir):
     env = zenith_simple_env
-    env.zenith_cli.create_branch("test_multixact", "empty")
-    pg = env.postgres.create_start('test_multixact')
+    test_multixact_timeline_id = env.zenith_cli.create_timeline()
+    pg = env.postgres.create_start('test_multixact', timeline=test_multixact_timeline_id)
 
     log.info("postgres is running on 'test_multixact' branch")
     pg_conn = pg.connect()
@@ -62,8 +62,10 @@ def test_multixact(zenith_simple_env: ZenithEnv, test_output_dir):
     assert int(next_multixact_id) > int(next_multixact_id_old)
 
     # Branch at this point
-    env.zenith_cli.create_branch("test_multixact_new", "test_multixact@" + lsn)
-    pg_new = env.postgres.create_start('test_multixact_new')
+    test_multixact_new_timeline_id = env.zenith_cli.create_timeline(
+        ancestor_timeline_id=test_multixact_timeline_id, ancestor_start_lsn=lsn)
+    pg_new = env.postgres.create_start('test_multixact_new',
+                                       timeline=test_multixact_new_timeline_id)
 
     log.info("postgres is running on 'test_multixact_new' branch")
     pg_new_conn = pg_new.connect()

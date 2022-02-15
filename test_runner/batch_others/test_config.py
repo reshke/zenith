@@ -11,10 +11,10 @@ pytest_plugins = ("fixtures.zenith_fixtures")
 #
 def test_config(zenith_simple_env: ZenithEnv):
     env = zenith_simple_env
-    env.zenith_cli.create_branch("test_config", "empty")
-
-    # change config
-    pg = env.postgres.create_start('test_config', config_lines=['log_min_messages=debug1'])
+    new_timeline_id = env.zenith_cli.create_timeline()
+    pg = env.postgres.create_start('test_config',
+                                   config_lines=['log_min_messages=debug1'],
+                                   timeline=new_timeline_id)
     log.info('postgres is running on test_config branch')
 
     with closing(pg.connect()) as conn:

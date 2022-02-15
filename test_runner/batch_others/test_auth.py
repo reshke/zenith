@@ -51,9 +51,8 @@ def test_compute_auth_to_pageserver(zenith_env_builder: ZenithEnvBuilder, with_w
     env = zenith_env_builder.init()
 
     branch = f"test_compute_auth_to_pageserver{with_wal_acceptors}"
-    env.zenith_cli.create_branch(branch, "main")
-
-    pg = env.postgres.create_start(branch)
+    new_timeline_id = env.zenith_cli.create_timeline()
+    pg = env.postgres.create_start(branch, timeline=new_timeline_id)
 
     with closing(pg.connect()) as conn:
         with conn.cursor() as cur:
