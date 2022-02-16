@@ -9,13 +9,14 @@ from typing import cast
 pytest_plugins = ("fixtures.zenith_fixtures")
 
 
-def helper_compare_branch_list(page_server_cur: PgCursor, env: ZenithEnv, initial_tenant: str):
+def helper_compare_branch_list(page_server_cur: PgCursor, env: ZenithEnv,
+                               initial_tenant: uuid.UUID):
     """
     Compare branches list returned by CLI and directly via API.
     Filters out branches created by other tests.
     """
 
-    page_server_cur.execute(f'branch_list {initial_tenant}')
+    page_server_cur.execute(f'branch_list {initial_tenant.hex}')
     branches_api = sorted(
         map(lambda b: cast(str, b['name']), json.loads(page_server_cur.fetchone()[0])))
     branches_api = [b for b in branches_api if b.startswith('test_cli_') or b in ('empty', 'main')]
@@ -79,14 +80,14 @@ def test_cli_tenant_list(zenith_simple_env: ZenithEnv):
     helper_compare_tenant_list(page_server_cur, env)
 
     # Create new tenant
-    tenant1 = uuid.uuid4().hex
+    tenant1 = uuid.uuid4()
     env.zenith_cli.create_tenant(tenant1)
 
     # check tenant1 appeared
     helper_compare_tenant_list(page_server_cur, env)
 
     # Create new tenant
-    tenant2 = uuid.uuid4().hex
+    tenant2 = uuid.uuid4()
     env.zenith_cli.create_tenant(tenant2)
 
     # check tenant2 appeared
@@ -95,9 +96,9 @@ def test_cli_tenant_list(zenith_simple_env: ZenithEnv):
     res = env.zenith_cli.list_tenants()
     tenants = sorted(map(lambda t: t.split()[0], res.stdout.splitlines()))
 
-    assert env.initial_tenant in tenants
-    assert tenant1 in tenants
-    assert tenant2 in tenants
+    assert env.initial_tenant.hex in tenants
+    assert tenant1.hex in tenants
+    assert tenant2.hex in tenants
 
 
 def test_cli_ipv4_listeners(zenith_env_builder: ZenithEnvBuilder):

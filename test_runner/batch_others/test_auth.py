@@ -14,7 +14,7 @@ def test_pageserver_auth(zenith_env_builder: ZenithEnvBuilder):
 
     ps = env.pageserver
 
-    tenant_token = env.auth_keys.generate_tenant_token(env.initial_tenant)
+    tenant_token = env.auth_keys.generate_tenant_token(env.initial_tenant.hex)
     invalid_tenant_token = env.auth_keys.generate_tenant_token(uuid4().hex)
     management_token = env.auth_keys.generate_management_token()
 
@@ -24,13 +24,14 @@ def test_pageserver_auth(zenith_env_builder: ZenithEnvBuilder):
     ps.safe_psql("status", password=management_token)
 
     # tenant can create branches
-    ps.safe_psql(f"branch_create {env.initial_tenant} new1 main", password=tenant_token)
+    ps.safe_psql(f"branch_create {env.initial_tenant.hex} new1 main", password=tenant_token)
     # console can create branches for tenant
-    ps.safe_psql(f"branch_create {env.initial_tenant} new2 main", password=management_token)
+    ps.safe_psql(f"branch_create {env.initial_tenant.hex} new2 main", password=management_token)
 
     # fail to create branch using token with different tenantid
     with pytest.raises(psycopg2.DatabaseError, match='Tenant id mismatch. Permission denied'):
-        ps.safe_psql(f"branch_create {env.initial_tenant} new2 main", password=invalid_tenant_token)
+        ps.safe_psql(f"branch_create {env.initial_tenant.hex} new2 main",
+                     password=invalid_tenant_token)
 
     # create tenant using management token
     ps.safe_psql(f"tenant_create {uuid4().hex}", password=management_token)
