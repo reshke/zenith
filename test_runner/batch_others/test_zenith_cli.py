@@ -20,13 +20,11 @@ def helper_compare_branch_list(page_server_cur: PgCursor, env: ZenithEnv, initia
         map(lambda b: cast(str, b['name']), json.loads(page_server_cur.fetchone()[0])))
     branches_api = [b for b in branches_api if b.startswith('test_cli_') or b in ('empty', 'main')]
 
-    res = env.zenith_cli(["branch"])
-    res.check_returncode()
+    res = env.zenith_cli.list_branches()
     branches_cli = sorted(map(lambda b: b.split(':')[-1].strip(), res.stdout.strip().split("\n")))
     branches_cli = [b for b in branches_cli if b.startswith('test_cli_') or b in ('empty', 'main')]
 
-    res = env.zenith_cli(["branch", f"--tenantid={initial_tenant}"])
-    res.check_returncode()
+    res = env.zenith_cli.list_branches(tenant_id=initial_tenant)
     branches_cli_with_tenant_arg = sorted(
         map(lambda b: b.split(':')[-1].strip(), res.stdout.strip().split("\n")))
     branches_cli_with_tenant_arg = [
@@ -43,19 +41,16 @@ def test_cli_branch_list(zenith_simple_env: ZenithEnv):
 
     # Initial sanity check
     helper_compare_branch_list(page_server_cur, env, env.initial_tenant)
-
-    # Create a branch for us
-    res = env.zenith_cli(["branch", "test_cli_branch_list_main", "empty"])
-    assert res.stderr == ''
+    res = env.zenith_cli.create_branch("test_cli_branch_list_main", "empty")
     helper_compare_branch_list(page_server_cur, env, env.initial_tenant)
 
     # Create a nested branch
-    res = env.zenith_cli(["branch", "test_cli_branch_list_nested", "test_cli_branch_list_main"])
+    res = env.zenith_cli.create_branch("test_cli_branch_list_nested", "test_cli_branch_list_main")
     assert res.stderr == ''
     helper_compare_branch_list(page_server_cur, env, env.initial_tenant)
 
     # Check that all new branches are visible via CLI
-    res = env.zenith_cli(["branch"])
+    res = env.zenith_cli.list_branches()
     assert res.stderr == ''
     branches_cli = sorted(map(lambda b: b.split(':')[-1].strip(), res.stdout.strip().split("\n")))
 
@@ -68,7 +63,7 @@ def helper_compare_tenant_list(page_server_cur: PgCursor, env: ZenithEnv):
     tenants_api = sorted(
         map(lambda t: cast(str, t['id']), json.loads(page_server_cur.fetchone()[0])))
 
-    res = env.zenith_cli(["tenant", "list"])
+    res = env.zenith_cli.list_tenants()
     assert res.stderr == ''
     tenants_cli = sorted(map(lambda t: t.split()[0], res.stdout.splitlines()))
 
@@ -85,22 +80,19 @@ def test_cli_tenant_list(zenith_simple_env: ZenithEnv):
 
     # Create new tenant
     tenant1 = uuid.uuid4().hex
-    res = env.zenith_cli(["tenant", "create", tenant1])
-    res.check_returncode()
+    env.zenith_cli.create_tenant(tenant1)
 
     # check tenant1 appeared
     helper_compare_tenant_list(page_server_cur, env)
 
     # Create new tenant
     tenant2 = uuid.uuid4().hex
-    res = env.zenith_cli(["tenant", "create", tenant2])
-    res.check_returncode()
+    env.zenith_cli.create_tenant(tenant2)
 
     # check tenant2 appeared
     helper_compare_tenant_list(page_server_cur, env)
 
-    res = env.zenith_cli(["tenant", "list"])
-    res.check_returncode()
+    res = env.zenith_cli.list_tenants()
     tenants = sorted(map(lambda t: t.split()[0], res.stdout.splitlines()))
 
     assert env.initial_tenant in tenants
